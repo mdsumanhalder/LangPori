@@ -1,12 +1,36 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db, type Text } from '@/db/db';
-import { ArrowLeft, Volume2, Save, X, Loader2, Play, Square, Pause } from 'lucide-react';
+import { ArrowLeft, Volume2, Save, X, Loader2, Play, Pause, Square, SkipBack, SkipForward, Sun, Moon, Minus, Plus, Type } from 'lucide-react';
 import Link from 'next/link';
 import { useSpeech } from '@/hooks/useSpeech';
 import { useAppSelector } from '@/store';
+import { motion, AnimatePresence } from 'framer-motion';
+
+const WORDS_PER_PAGE = 200;
+
+// --- Reader Display Settings ---
+interface ReaderSettings {
+    fontSize: number; // percentage, e.g. 100
+    darkMode: boolean; // reader-local dark mode
+}
+
+function getStoredSettings(): ReaderSettings {
+    if (typeof window === 'undefined') return { fontSize: 100, darkMode: false };
+    try {
+        const stored = localStorage.getItem('readerSettings');
+        if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
+    return { fontSize: 100, darkMode: false };
+}
+
+function storeSettings(settings: ReaderSettings) {
+    try {
+        localStorage.setItem('readerSettings', JSON.stringify(settings));
+    } catch { /* ignore */ }
+}
 
 export default function ReaderPage() {
     const params = useParams();
@@ -18,7 +42,19 @@ export default function ReaderPage() {
     const [selectedWord, setSelectedWord] = useState<{ word: string, translation: string | null, position: { x: number, y: number } } | null>(null);
     const [translating, setTranslating] = useState(false);
 
+    // Pagination
+    const [currentPage, setCurrentPage] = useState(0);
+
+    // Aa Settings
+    const [showAaPanel, setShowAaPanel] = useState(false);
+    const [readerSettings, setReaderSettings] = useState<ReaderSettings>({ fontSize: 100, darkMode: false });
+
     const { speak, speakStateless, isSpeaking, stopSpeaking, pauseSpeaking, resumeSpeaking, isPaused, currentWordRange } = useSpeech();
+
+    // Load settings on mount
+    useEffect(() => {
+        setReaderSettings(getStoredSettings());
+    }, []);
 
     // Fetch text on load
     useEffect(() => {
@@ -36,56 +72,138 @@ export default function ReaderPage() {
         fetchText();
     }, [params.id, router]);
 
-    const handleToggleAudio = () => {
+    // --- Pagination Logic ---
+    const pages = useMemo(() => {
+        if (!text) return [];
+        const words = text.content.split(/(\s+)/);
+        const result: string[] = [];
+        let currentPageWords: string[] = [];
+        let wordCount = 0;
+
+        for (const word of words) {
+            currentPageWords.push(word);
+            if (!/^\s+$/.test(word)) {
+                wordCount++;
+            }
+            if (wordCount >= WORDS_PER_PAGE) {
+                result.push(currentPageWords.join(''));
+                currentPageWords = [];
+                wordCount = 0;
+            }
+        }
+        if (currentPageWords.length > 0) {
+            result.push(currentPageWords.join(''));
+        }
+        return result;
+    }, [text]);
+
+    const totalPages = pages.length;
+    const pageContent = pages[currentPage] || '';
+
+    // Calculate character offset for current page (for TTS highlighting)
+    const pageCharOffset = useMemo(() => {
+        if (!text) return 0;
+        let offset = 0;
+        for (let i = 0; i < currentPage; i++) {
+            offset += (pages[i]?.length || 0);
+        }
+        return offset;
+    }, [text, pages, currentPage]);
+
+    const announceAndReadPage = useCallback(async (pageNum: number, pageText: string) => {
+        // Announce the page number first, then read the content
+        const announcement = nativeLanguage === 'et' ? `Lehekülg ${pageNum}` : `Page ${pageNum}`;
+        await speakStateless(announcement, nativeLanguage);
+        // Small delay before reading content
+        await new Promise(resolve => setTimeout(resolve, 300));
+        speak(pageText, targetLanguage, { highlight: true });
+    }, [nativeLanguage, targetLanguage, speakStateless, speak]);
+
+    const goToNextPage = useCallback(() => {
+        if (currentPage < totalPages - 1) {
+            stopSpeaking();
+            const nextPage = currentPage + 1;
+            setCurrentPage(nextPage);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            // Announce page and auto-read
+            const nextPageContent = pages[nextPage];
+            if (nextPageContent) {
+                setTimeout(() => announceAndReadPage(nextPage + 1, nextPageContent), 200);
+            }
+        }
+    }, [currentPage, totalPages, stopSpeaking, pages, announceAndReadPage]);
+
+    const goToPrevPage = useCallback(() => {
+        if (currentPage > 0) {
+            stopSpeaking();
+            const prevPage = currentPage - 1;
+            setCurrentPage(prevPage);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            // Announce page and auto-read
+            const prevPageContent = pages[prevPage];
+            if (prevPageContent) {
+                setTimeout(() => announceAndReadPage(prevPage + 1, prevPageContent), 200);
+            }
+        }
+    }, [currentPage, stopSpeaking, pages, announceAndReadPage]);
+
+    // --- Audio ---
+    const handleToggleAudio = useCallback(() => {
         if (isSpeaking) {
             pauseSpeaking();
         } else if (isPaused) {
             resumeSpeaking();
-        } else if (text) {
-            // Enable highlighting mode for full text reading
-            speak(text.content, targetLanguage, { highlight: true });
+        } else if (pageContent) {
+            speak(pageContent, targetLanguage, { highlight: true });
         }
-    };
+    }, [isSpeaking, isPaused, pageContent, targetLanguage, speak, pauseSpeaking, resumeSpeaking]);
 
-    const handleStop = () => {
+    const handleStop = useCallback(() => {
         stopSpeaking();
-    };
+    }, [stopSpeaking]);
 
+    // --- Aa Settings ---
+    const updateSettings = useCallback((updates: Partial<ReaderSettings>) => {
+        setReaderSettings(prev => {
+            const newSettings = { ...prev, ...updates };
+            storeSettings(newSettings);
+            return newSettings;
+        });
+    }, []);
+
+    const increaseFontSize = useCallback(() => {
+        updateSettings({ fontSize: Math.min(readerSettings.fontSize + 10, 200) });
+    }, [readerSettings.fontSize, updateSettings]);
+
+    const decreaseFontSize = useCallback(() => {
+        updateSettings({ fontSize: Math.max(readerSettings.fontSize - 10, 60) });
+    }, [readerSettings.fontSize, updateSettings]);
+
+    const toggleDarkMode = useCallback(() => {
+        updateSettings({ darkMode: !readerSettings.darkMode });
+    }, [readerSettings.darkMode, updateSettings]);
 
     // Handle Word Click
     const handleWordClick = async (e: React.MouseEvent<HTMLSpanElement>, word: string) => {
-        // Clean the word (remove punctuation)
-        const cleanWord = word.replace(/[.,!?;:()"]/g, '').trim();
+        const cleanWord = word.replace(/[.,!?;:()\"]/g, '').trim();
         if (!cleanWord) return;
 
-        // Position popup near the click
         const rect = e.currentTarget.getBoundingClientRect();
         const position = {
             x: rect.left + window.scrollX,
             y: rect.bottom + window.scrollY + 10
         };
 
-        setSelectedWord({
-            word: cleanWord,
-            translation: null,
-            position
-        });
+        setSelectedWord({ word: cleanWord, translation: null, position });
         setTranslating(true);
 
-        // Play Audio (via useSpeech instead of proxy for consistency) - No highlighting needed for single word
-        // ONLY speak if we are not already speaking (to avoid interrupting the main flow)
         if (!isSpeaking) {
             speak(cleanWord, targetLanguage);
         }
 
-        // Fetch Translation
         try {
-            // Check if we already have it in "words" table? (Optimization for later)
-
-            // Fetch from MyMemory API
             const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanWord)}&langpair=${targetLanguage}|${nativeLanguage}`);
             const data = await res.json();
-
             if (data.responseData && data.responseData.translatedText) {
                 setSelectedWord(prev => prev ? { ...prev, translation: data.responseData.translatedText } : null);
             } else {
@@ -101,12 +219,11 @@ export default function ReaderPage() {
 
     const handleSaveFlashcard = async () => {
         if (!selectedWord || !selectedWord.translation) return;
-
         try {
             await db.words.add({
                 original: selectedWord.word,
                 translation: selectedWord.translation,
-                context: text?.content.substring(0, 100) || "", // Simplified context for now
+                context: text?.content.substring(0, 100) || "",
                 srsLevel: 0,
                 nextReview: Date.now(),
                 createdAt: Date.now()
@@ -119,81 +236,67 @@ export default function ReaderPage() {
     };
 
     if (loading) {
-        return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin" /></div>;
+        return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin w-8 h-8 text-blue-500" /></div>;
     }
 
     if (!text) return null;
 
-    // Parser: Split text into words but keep whitespace/punctuation for reconstruction
-    // This is a simple regex splitter. For production, a more robust tokenization is needed.
-    const tokens = text.content.split(/(\s+|[.,!?;:()"]+)/g);
-
-    // Character index counter for highlighting
+    // Tokenize page content
+    const tokens = pageContent.split(/(\s+|[.,!?;:()\"]+)/g);
     let charIndex = 0;
 
+    // Reader background/text colors based on settings
+    const readerBg = readerSettings.darkMode ? 'bg-gray-950' : 'bg-amber-50';
+    const readerText = readerSettings.darkMode ? 'text-gray-100' : 'text-gray-900';
+    const headerBg = readerSettings.darkMode ? 'bg-gray-900/95' : 'bg-white/95';
+    const headerText = readerSettings.darkMode ? 'text-white' : 'text-gray-900';
+
     return (
-        <div className="min-h-screen p-4 sm:p-6 lg:p-8 pb-32">
-            <div className="max-w-3xl mx-auto">
-                <header className="mb-8 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                        <Link href="/" className="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-                            <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
+        <div className={`min-h-screen ${readerBg} transition-colors duration-300`}>
+            {/* Header */}
+            <header className={`sticky top-0 z-30 ${headerBg} backdrop-blur-md border-b ${readerSettings.darkMode ? 'border-gray-800' : 'border-gray-200/50'} transition-colors duration-300`}>
+                <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <Link href="/" className={`p-2 -ml-2 rounded-full transition-colors ${readerSettings.darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}`}>
+                            <ArrowLeft className={`w-5 h-5 ${headerText}`} />
                         </Link>
-                        <h1 className="text-xl sm:text-3xl font-bold line-clamp-1">{text.title}</h1>
+                        <h1 className={`text-lg sm:text-xl font-bold line-clamp-1 ${headerText}`}>{text.title}</h1>
                     </div>
-                    <div className="flex gap-2">
-                        {(isSpeaking || isPaused) && (
-                            <button
-                                onClick={handleStop}
-                                className="p-3 rounded-full bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 transition-all"
-                                title="Stop Reading"
-                            >
-                                <Square className="w-5 h-5 fill-current" />
-                            </button>
-                        )}
-                        <button
-                            onClick={handleToggleAudio}
-                            className={`p-3 rounded-full transition-all ${isSpeaking
-                                ? 'bg-amber-100 text-amber-600 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400'
-                                : 'bg-blue-100 text-blue-600 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400'
-                                }`}
-                            title={isSpeaking ? "Pause" : (isPaused ? "Resume" : "Read Aloud")}
-                        >
-                            {isSpeaking ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
-                        </button>
+                    <div className={`text-xs font-medium px-3 py-1 rounded-full ${readerSettings.darkMode ? 'bg-gray-800 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>
+                        {currentPage + 1} / {totalPages}
                     </div>
-                </header>
+                </div>
+            </header>
 
-                <div className="prose dark:prose-invert max-w-none text-lg sm:text-xl leading-loose font-serif">
-                    <p>
+            {/* Reader Content */}
+            <main className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-36">
+                <div
+                    className={`prose max-w-none leading-loose font-serif ${readerText} transition-all duration-300`}
+                    style={{ fontSize: `${readerSettings.fontSize}%` }}
+                >
+                    <p className="whitespace-pre-wrap">
                         {tokens.map((token, index) => {
-                            const currentStart = charIndex;
+                            const currentStart = pageCharOffset + charIndex;
                             const currentEnd = currentStart + token.length;
-                            charIndex = currentEnd;
+                            charIndex += token.length;
 
-                            // Determine highlighting
-                            // We highlight if the TTS current word range overlaps with this token's range
-                            // Usually TTS gives the start index of the word.
-                            // Determine highlighting
-                            // We highlight if the current simulated cursor (1 char range) falls within this token
                             const isHighlighted = currentWordRange &&
                                 currentWordRange.start >= currentStart &&
                                 currentWordRange.start < currentEnd;
 
-
-                            // If it's whitespace or punctuation, just render it (but still check highlight for safety/continuity?)
-                            if (/^[\s.,!?;:()"]+$/.test(token)) {
-                                return <span key={index} className={isHighlighted ? "bg-amber-200 dark:bg-amber-900/50" : ""}>{token}</span>;
+                            if (/^[\s.,!?;:()\"]+$/.test(token)) {
+                                return <span key={index} className={isHighlighted ? "bg-amber-300/60 dark:bg-amber-700/60 rounded" : ""}>{token}</span>;
                             }
 
-                            // Otherwise it's a word
                             return (
                                 <span
                                     key={index}
                                     onClick={(e) => handleWordClick(e, token)}
                                     className={`cursor-pointer rounded px-0.5 transition-colors ${isHighlighted
-                                        ? 'bg-amber-200 dark:bg-amber-900/50 text-gray-900 dark:text-gray-100' // Highlight style
-                                        : 'hover:bg-blue-100 dark:hover:bg-blue-900/50 hover:text-blue-600 dark:hover:text-blue-400' // Hover style
+                                        ? 'bg-amber-300/60 rounded'
+                                        : readerSettings.darkMode
+                                            ? 'hover:bg-gray-800 hover:text-blue-400'
+                                            : 'hover:bg-blue-100 hover:text-blue-600'
                                         }`}
                                 >
                                     {token}
@@ -202,32 +305,176 @@ export default function ReaderPage() {
                         })}
                     </p>
                 </div>
+            </main>
+
+            {/* ===== BOTTOM TOOLBAR ===== */}
+            <div className={`fixed bottom-0 left-0 right-0 z-30 ${readerSettings.darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} border-t transition-colors duration-300`}>
+                {/* Progress Bar */}
+                <div className={`h-1 ${readerSettings.darkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>
+                    <div
+                        className="h-full bg-gradient-to-r from-red-400 to-orange-400 transition-all duration-300 rounded-r-full"
+                        style={{ width: `${totalPages > 1 ? ((currentPage) / (totalPages - 1)) * 100 : 100}%` }}
+                    />
+                </div>
+
+                {/* Toolbar Buttons */}
+                <div className="max-w-md mx-auto flex items-center justify-between px-6 py-3 safe-area-bottom">
+                    {/* Aa Button */}
+                    <button
+                        onClick={() => setShowAaPanel(!showAaPanel)}
+                        className={`text-xl font-serif font-bold transition-colors ${showAaPanel
+                            ? 'text-blue-500'
+                            : readerSettings.darkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                    >
+                        Aa
+                    </button>
+
+                    {/* Previous Page */}
+                    <button
+                        onClick={goToPrevPage}
+                        disabled={currentPage === 0}
+                        className={`p-2 transition-colors disabled:opacity-30 ${readerSettings.darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'}`}
+                    >
+                        <SkipBack className="w-6 h-6 fill-current" />
+                    </button>
+
+                    {/* Play / Pause Button */}
+                    <div className="flex items-center gap-2">
+                        {(isSpeaking || isPaused) && (
+                            <button
+                                onClick={handleStop}
+                                className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                            >
+                                <Square className="w-4 h-4 fill-current" />
+                            </button>
+                        )}
+                        <button
+                            onClick={handleToggleAudio}
+                            className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 ${isSpeaking
+                                ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30'
+                                : 'bg-gradient-to-br from-red-400 to-orange-500 hover:from-red-500 hover:to-orange-600 text-white shadow-red-400/30'
+                                }`}
+                        >
+                            {isSpeaking ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-0.5" />}
+                        </button>
+                    </div>
+
+                    {/* Next Page */}
+                    <button
+                        onClick={goToNextPage}
+                        disabled={currentPage >= totalPages - 1}
+                        className={`p-2 transition-colors disabled:opacity-30 ${readerSettings.darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'}`}
+                    >
+                        <SkipForward className="w-6 h-6 fill-current" />
+                    </button>
+
+                    {/* Page indicator */}
+                    <span className={`text-xs font-medium tabular-nums ${readerSettings.darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                        {currentPage + 1}/{totalPages}
+                    </span>
+                </div>
             </div>
 
-            {/* Translation Popup */}
+            {/* ===== Aa SETTINGS PANEL ===== */}
+            <AnimatePresence>
+                {showAaPanel && (
+                    <>
+                        {/* Backdrop */}
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="fixed inset-0 z-40"
+                            onClick={() => setShowAaPanel(false)}
+                        />
+                        {/* Panel */}
+                        <motion.div
+                            initial={{ y: '100%', opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            exit={{ y: '100%', opacity: 0 }}
+                            transition={{ type: 'spring', damping: 30, stiffness: 400 }}
+                            className={`fixed bottom-[72px] left-0 right-0 z-50 rounded-t-3xl shadow-2xl ${readerSettings.darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} border-t px-6 py-6 space-y-6`}
+                        >
+                            {/* Background Color */}
+                            <div>
+                                <h3 className={`text-sm font-semibold mb-3 ${readerSettings.darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Background color</h3>
+                                <div className="flex gap-3">
+                                    {/* Light */}
+                                    <button
+                                        onClick={() => updateSettings({ darkMode: false })}
+                                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-full border-2 transition-all ${!readerSettings.darkMode
+                                            ? 'border-orange-400 bg-amber-50 text-orange-500'
+                                            : 'border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-400'
+                                            }`}
+                                    >
+                                        <Sun className={`w-5 h-5 ${!readerSettings.darkMode ? 'text-orange-500' : ''}`} />
+                                    </button>
+                                    {/* Dark */}
+                                    <button
+                                        onClick={() => updateSettings({ darkMode: true })}
+                                        className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-full border-2 transition-all ${readerSettings.darkMode
+                                            ? 'border-blue-500 bg-gray-800 text-blue-400'
+                                            : 'border-gray-300 bg-gray-700 text-gray-400'
+                                            }`}
+                                    >
+                                        <Moon className={`w-5 h-5 ${readerSettings.darkMode ? 'text-blue-400' : 'text-gray-400'}`} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Text Size */}
+                            <div>
+                                <h3 className={`text-sm font-semibold mb-3 ${readerSettings.darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Text size</h3>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        onClick={decreaseFontSize}
+                                        disabled={readerSettings.fontSize <= 60}
+                                        className={`flex-1 py-3 rounded-full text-center font-bold transition-all disabled:opacity-30 ${readerSettings.darkMode ? 'bg-gray-800 text-gray-300 hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                                    >
+                                        A-
+                                    </button>
+                                    <span className={`font-bold text-lg tabular-nums min-w-[3rem] text-center ${readerSettings.darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                        {readerSettings.fontSize}%
+                                    </span>
+                                    <button
+                                        onClick={increaseFontSize}
+                                        disabled={readerSettings.fontSize >= 200}
+                                        className={`flex-1 py-3 rounded-full text-center font-bold transition-all disabled:opacity-30 ${readerSettings.darkMode ? 'bg-gray-800 text-gray-300 hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                                    >
+                                        A+
+                                    </button>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </>
+                )}
+            </AnimatePresence>
+
+            {/* ===== Translation Popup ===== */}
             {selectedWord && (
                 <div
-                    className="fixed z-50 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 p-5 w-[calc(100%-2rem)] sm:w-72 animate-in fade-in slide-in-from-bottom-4 zoom-in-95 duration-200"
+                    className={`fixed z-50 rounded-2xl shadow-2xl border p-5 w-[calc(100%-2rem)] sm:w-72 animate-in fade-in slide-in-from-bottom-4 zoom-in-95 duration-200 ${readerSettings.darkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}
                     style={{
                         left: '50%',
                         transform: 'translateX(-50%)',
-                        bottom: '2rem',
+                        bottom: '5.5rem',
                     }}
                 >
                     <div className="flex justify-between items-start mb-2">
                         <h3 className="font-bold text-lg text-blue-600 dark:text-blue-400 capitalize">{selectedWord.word}</h3>
-                        <button onClick={() => setSelectedWord(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                        <button onClick={() => setSelectedWord(null)} className="text-gray-400 hover:text-gray-600">
                             <X className="w-4 h-4" />
                         </button>
                     </div>
 
                     {translating ? (
-                        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                        <div className="flex items-center gap-2 text-gray-500 text-sm">
                             <Loader2 className="w-4 h-4 animate-spin" /> Translating...
                         </div>
                     ) : (
                         <div className="mb-4">
-                            <p className="text-lg font-medium">{selectedWord.translation}</p>
+                            <p className={`text-lg font-medium ${readerSettings.darkMode ? 'text-gray-200' : 'text-gray-900'}`}>{selectedWord.translation}</p>
                         </div>
                     )}
 
@@ -241,15 +488,11 @@ export default function ReaderPage() {
                         <button
                             onClick={async () => {
                                 const wasPlaying = isSpeaking;
-                                if (wasPlaying) {
-                                    pauseSpeaking();
-                                }
+                                if (wasPlaying) pauseSpeaking();
                                 await speakStateless(selectedWord.word, targetLanguage);
-                                if (wasPlaying) {
-                                    resumeSpeaking();
-                                }
+                                if (wasPlaying) resumeSpeaking();
                             }}
-                            className="p-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-gray-700 dark:text-gray-200 transition-colors"
+                            className={`p-2 rounded-lg transition-colors ${readerSettings.darkMode ? 'bg-gray-800 hover:bg-gray-700 text-gray-300' : 'bg-gray-100 hover:bg-gray-200 text-gray-700'}`}
                         >
                             <Volume2 className="w-4 h-4" />
                         </button>
