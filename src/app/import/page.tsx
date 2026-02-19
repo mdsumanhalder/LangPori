@@ -1,16 +1,20 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/db/db';
-import { ArrowLeft, Save, Upload, Image as ImageIcon, Loader2, Camera, X, Check, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Save, Upload, Image as ImageIcon, Loader2, Camera, X, Check, ChevronDown, Minus, Plus } from 'lucide-react';
 import Link from 'next/link';
 import Tesseract from 'tesseract.js';
 import Webcam from 'react-webcam';
+import { motion, AnimatePresence } from 'framer-motion';
 
 // Camera constraints for mobile (back camera preferred)
 const videoConstraints = {
-    facingMode: "environment"
+    facingMode: "environment",
+    width: { ideal: 4096 }, // Request 4K resolution
+    height: { ideal: 2160 },
+    focusMode: { ideal: "continuous" } // Request continuous focus
 };
 
 export default function ImportPage() {
@@ -24,6 +28,8 @@ export default function ImportPage() {
     // Camera state
     const [showCamera, setShowCamera] = useState(false);
     const [showImageOptions, setShowImageOptions] = useState(false);
+    const [zoom, setZoom] = useState(1);
+    const [hasZoomSupport, setHasZoomSupport] = useState(false);
     const webcamRef = useRef<Webcam>(null);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -183,11 +189,11 @@ export default function ImportPage() {
             const { content: newContent } = processOCRResult(text);
 
             // Validation:
-            // 1. Confidence < 60 (likely noise/folds)
+            // 1. Confidence < 50 (relaxed from 60)
             // 2. Word Count < 2 words of 3+ letters (filters single garbage words like "Lada")
             const meaningfulWords = newContent.split(/\s+/).filter(w => w.replace(/[^a-zA-ZäõüöÄÕÜÖ]/g, '').length >= 3);
 
-            if (confidence < 60 || meaningfulWords.length < 2) {
+            if (confidence < 50 || meaningfulWords.length < 2) {
                 alert('Image is too unclear or contains no meaningful text (must have at least two 3+ letter words).');
                 setTitle('');
                 setContent('');
@@ -220,10 +226,49 @@ export default function ImportPage() {
                 .then(blob => {
                     const file = new File([blob], `captured_photo_${Date.now()}.jpg`, { type: "image/jpeg" });
                     setShowCamera(false); // Close camera modal
+                    setZoom(1); // Reset zoom
                     processImageFile(file); // Process the file
                 });
         }
+    }, [webcamRef, processImageFile]);
+
+    // Apply zoom constraints
+    const handleZoomChange = useCallback((value: number) => {
+        setZoom(value);
+        const videoTrack = webcamRef.current?.video?.srcObject instanceof MediaStream
+            ? webcamRef.current.video.srcObject.getVideoTracks()[0]
+            : null;
+
+        if (videoTrack && typeof videoTrack.applyConstraints === 'function') {
+            const capabilities = videoTrack.getCapabilities() as any;
+            if (capabilities.zoom) {
+                videoTrack.applyConstraints({
+                    advanced: [{ zoom: value }]
+                } as any).catch(e => console.error("Hardware zoom failed:", e));
+            }
+        }
     }, [webcamRef]);
+
+    // Check zoom support when camera opens
+    useEffect(() => {
+        if (showCamera) {
+            const checkZoom = () => {
+                const videoTrack = webcamRef.current?.video?.srcObject instanceof MediaStream
+                    ? webcamRef.current.video.srcObject.getVideoTracks()[0]
+                    : null;
+
+                if (videoTrack) {
+                    const capabilities = videoTrack.getCapabilities() as any;
+                    if (capabilities.zoom) {
+                        setHasZoomSupport(true);
+                    }
+                }
+            };
+            // Small delay to allow stream to initialize
+            const timer = setTimeout(checkZoom, 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [showCamera]);
 
     return (
         <div className="min-h-screen p-4 sm:p-6 lg:p-8">
@@ -362,39 +407,103 @@ export default function ImportPage() {
                 </form>
 
                 {/* Camera Modal */}
-                {showCamera && (
-                    <div className="fixed inset-0 z-50 bg-black flex flex-col">
-                        <div className="relative flex-1 flex items-center justify-center overflow-hidden">
-                            <Webcam
-                                audio={false}
-                                ref={webcamRef}
-                                screenshotFormat="image/jpeg"
-                                videoConstraints={videoConstraints}
-                                className="absolute min-w-full min-h-full object-cover"
-                            />
-                        </div>
+                <AnimatePresence>
+                    {showCamera && (
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="fixed inset-0 z-50 bg-black flex flex-col"
+                        >
+                            {/* Camera Preview Area */}
+                            <div className="relative flex-1 flex items-center justify-center overflow-hidden">
+                                <Webcam
+                                    audio={false}
+                                    ref={webcamRef}
+                                    screenshotFormat="image/jpeg"
+                                    videoConstraints={videoConstraints}
+                                    className="absolute min-w-full min-h-full object-cover transition-all duration-300 ease-out"
+                                    style={{ transform: !hasZoomSupport ? `scale(${zoom})` : 'none' }}
+                                />
 
-                        {/* Camera Controls */}
-                        <div className="h-32 bg-black/80 flex items-center justify-center gap-8 pb-8 relative">
-                            <button
-                                onClick={() => setShowCamera(false)}
-                                className="p-4 rounded-full bg-gray-800 text-white hover:bg-gray-700 transition"
-                            >
-                                <X className="w-6 h-6" />
-                            </button>
+                                {/* Corner Guards/Focus Frame */}
+                                <div className="absolute inset-8 border-2 border-white/20 pointer-events-none rounded-3xl">
+                                    <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-white/60 rounded-tl-xl" />
+                                    <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-white/60 rounded-tr-xl" />
+                                    <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-white/60 rounded-bl-xl" />
+                                    <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-white/60 rounded-br-xl" />
+                                </div>
+                            </div>
 
-                            <button
-                                onClick={capturePhoto}
-                                className="p-1 rounded-full border-4 border-white transition-transform active:scale-95"
-                            >
-                                <div className="w-16 h-16 bg-white rounded-full" />
-                            </button>
+                            {/* Camera Bottom Controls - Design Refined */}
+                            <div className="bg-black py-8 px-6 flex flex-col items-center gap-8">
+                                {/* Zoom Controls Bar */}
+                                <div className="w-full max-w-sm flex items-center gap-4 bg-white/10 backdrop-blur-xl rounded-full px-5 py-3 border border-white/10 shadow-lg">
+                                    <button
+                                        type="button"
+                                        onClick={() => handleZoomChange(Math.max(1, zoom - 0.2))}
+                                        className="p-2 -m-2 text-white/70 hover:text-white transition-colors active:scale-90"
+                                    >
+                                        <Minus className="w-5 h-5" />
+                                    </button>
 
-                            {/* Placeholder for swapping camera if needed later */}
-                            <div className="w-14" />
-                        </div>
-                    </div>
-                )}
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        max="3"
+                                        step="0.1"
+                                        value={zoom}
+                                        onChange={(e) => handleZoomChange(parseFloat(e.target.value))}
+                                        className="flex-1 accent-white h-1 bg-white/20 rounded-full appearance-none cursor-pointer"
+                                    />
+
+                                    <button
+                                        type="button"
+                                        onClick={() => handleZoomChange(Math.min(3, zoom + 0.2))}
+                                        className="p-2 -m-2 text-white/70 hover:text-white transition-colors active:scale-90"
+                                    >
+                                        <Plus className="w-5 h-5" />
+                                    </button>
+
+                                    <span className="text-[10px] font-bold text-white/50 w-8 text-right tabular-nums">
+                                        {zoom.toFixed(1)}x
+                                    </span>
+                                </div>
+
+                                {/* Main Actions */}
+                                <div className="w-full flex items-center justify-between max-w-sm">
+                                    {/* Close Button */}
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setShowCamera(false);
+                                            setZoom(1);
+                                        }}
+                                        className="w-12 h-12 flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all border border-white/5"
+                                    >
+                                        <X className="w-6 h-6" />
+                                    </button>
+
+                                    {/* Shutter Button Container */}
+                                    <div className="relative group">
+                                        <motion.button
+                                            whileTap={{ scale: 0.85 }}
+                                            onClick={capturePhoto}
+                                            className="relative z-10 w-20 h-20 rounded-full bg-white flex items-center justify-center"
+                                        >
+                                            <div className="w-[calc(100%-6px)] h-[calc(100%-6px)] rounded-full border-2 border-black/5" />
+                                        </motion.button>
+                                        {/* Shutter Outer Ring */}
+                                        <div className="absolute inset-[-8px] border-4 border-white/20 rounded-full group-active:border-white/40 transition-all duration-300" />
+                                    </div>
+
+                                    {/* Empty Space for alignment */}
+                                    <div className="w-12" />
+                                </div>
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
         </div>
     );
