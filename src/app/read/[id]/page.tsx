@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db, type Text } from '@/db/db';
-import { ArrowLeft, Volume2, Save, X, Loader2, Play, Pause, Square, SkipBack, SkipForward, Sun, Moon, Minus, Plus, Type } from 'lucide-react';
+import { ArrowLeft, Volume2, Save, X, Loader2, Play, Pause, Square, SkipBack, SkipForward, Sun, Moon, Minus, Plus, Type, Settings } from 'lucide-react';
 import Link from 'next/link';
 import { useSpeech } from '@/hooks/useSpeech';
 import { useAppSelector } from '@/store';
@@ -49,7 +49,7 @@ export default function ReaderPage() {
     const [showAaPanel, setShowAaPanel] = useState(false);
     const [readerSettings, setReaderSettings] = useState<ReaderSettings>({ fontSize: 100, darkMode: false });
 
-    const { speak, speakStateless, isSpeaking, stopSpeaking, pauseSpeaking, resumeSpeaking, isPaused, currentWordRange } = useSpeech();
+    const { speak, speakStateless, isSpeaking, stopSpeaking, pauseSpeaking, resumeSpeaking, isPaused, currentWordRange, playbackRate, setPlaybackRate } = useSpeech();
 
     // Load settings on mount
     useEffect(() => {
@@ -100,15 +100,8 @@ export default function ReaderPage() {
     const totalPages = pages.length;
     const pageContent = pages[currentPage] || '';
 
-    // Calculate character offset for current page (for TTS highlighting)
-    const pageCharOffset = useMemo(() => {
-        if (!text) return 0;
-        let offset = 0;
-        for (let i = 0; i < currentPage; i++) {
-            offset += (pages[i]?.length || 0);
-        }
-        return offset;
-    }, [text, pages, currentPage]);
+
+
 
     const announceAndReadPage = useCallback(async (pageNum: number, pageText: string) => {
         // Announce the page number first, then read the content
@@ -197,9 +190,8 @@ export default function ReaderPage() {
         setSelectedWord({ word: cleanWord, translation: null, position });
         setTranslating(true);
 
-        if (!isSpeaking) {
-            speak(cleanWord, targetLanguage);
-        }
+        // Play the word independently without triggering the main audio player
+        speakStateless(cleanWord, targetLanguage);
 
         try {
             const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanWord)}&langpair=${targetLanguage}|${nativeLanguage}`);
@@ -276,7 +268,7 @@ export default function ReaderPage() {
                 >
                     <p className="whitespace-pre-wrap">
                         {tokens.map((token, index) => {
-                            const currentStart = pageCharOffset + charIndex;
+                            const currentStart = charIndex;
                             const currentEnd = currentStart + token.length;
                             charIndex += token.length;
 
@@ -319,15 +311,15 @@ export default function ReaderPage() {
 
                 {/* Toolbar Buttons */}
                 <div className="max-w-md mx-auto flex items-center justify-between px-6 py-3 safe-area-bottom">
-                    {/* Aa Button */}
+                    {/* Settings Button (formerly Aa) */}
                     <button
                         onClick={() => setShowAaPanel(!showAaPanel)}
-                        className={`text-xl font-serif font-bold transition-colors ${showAaPanel
+                        className={`p-2 transition-colors ${showAaPanel
                             ? 'text-blue-500'
                             : readerSettings.darkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-600 hover:text-gray-900'
                             }`}
                     >
-                        Aa
+                        <Settings className="w-6 h-6" />
                     </button>
 
                     {/* Previous Page */}
@@ -444,6 +436,27 @@ export default function ReaderPage() {
                                     >
                                         A+
                                     </button>
+                                </div>
+                            </div>
+
+                            {/* Audio Speed */}
+                            <div>
+                                <h3 className={`text-sm font-semibold mb-3 ${readerSettings.darkMode ? 'text-gray-400' : 'text-gray-500'}`}>Audio speed</h3>
+                                <div className="flex items-center gap-2">
+                                    {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                                        <button
+                                            key={speed}
+                                            onClick={() => setPlaybackRate(speed)}
+                                            className={`flex-1 py-2.5 rounded-full text-center text-sm font-bold transition-all ${playbackRate === speed
+                                                ? 'bg-blue-500 text-white shadow-md'
+                                                : readerSettings.darkMode
+                                                    ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                }`}
+                                        >
+                                            {speed}x
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
                         </motion.div>

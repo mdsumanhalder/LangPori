@@ -17,6 +17,8 @@ interface UseSpeechReturn {
     isPaused: boolean;
     currentWordRange: { start: number; end: number } | null;
     speakStateless: (text: string, lang?: string) => Promise<void>;
+    playbackRate: number;
+    setPlaybackRate: (rate: number) => void;
 }
 
 
@@ -31,6 +33,17 @@ export function useSpeech(): UseSpeechReturn {
     const recognitionRef = useRef<SpeechRecognition | null>(null);
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const playbackTokenRef = useRef(0);
+    const playbackRateRef = useRef(1.0);
+    const [playbackRate, setPlaybackRateState] = useState(1.0);
+
+    const setPlaybackRate = useCallback((rate: number) => {
+        playbackRateRef.current = rate;
+        setPlaybackRateState(rate);
+        // Apply to currently playing audio immediately
+        if (audioRef.current) {
+            audioRef.current.playbackRate = rate;
+        }
+    }, []);
 
     // Check browser support
     useEffect(() => {
@@ -126,6 +139,7 @@ export function useSpeech(): UseSpeechReturn {
 
                     const chunk = chunks[index];
                     const audio = new Audio(chunk.url);
+                    audio.playbackRate = playbackRateRef.current;
                     audioRef.current = audio;
 
                     // Simulated Highlighting Loop
@@ -227,7 +241,7 @@ export function useSpeech(): UseSpeechReturn {
                 return;
             }
 
-            utterance.rate = 0.9; // Slightly slower
+            utterance.rate = playbackRateRef.current;
             utterance.pitch = 1.0;
             utterance.volume = 1.0;
 
@@ -455,6 +469,8 @@ export function useSpeech(): UseSpeechReturn {
         pauseSpeaking,
         resumeSpeaking,
         isPaused,
-        currentWordRange
+        currentWordRange,
+        playbackRate,
+        setPlaybackRate
     };
 }
