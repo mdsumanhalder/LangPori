@@ -109,12 +109,14 @@ export default function DictionaryPage() {
             {/* Header */}
             {/* Header */}
             <header className="sticky top-0 z-50 backdrop-blur-lg bg-white/70 dark:bg-gray-900/70 border-b border-gray-200/50 dark:border-gray-700/50">
-                <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-                    <h1 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <Book className="w-5 h-5" />
+                <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-4">
+                    <Link href="/" className="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                        <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
+                    </Link>
+                    <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2 truncate">
+                        <Book className="w-5 h-5 flex-shrink-0 text-blue-600" />
                         Dictionary
                     </h1>
-                    <div className="w-5" />
                 </div>
             </header>
 
@@ -127,7 +129,7 @@ export default function DictionaryPage() {
                         value={searchQuery}
                         onChange={(e) => handleSearch(e.target.value)}
                         placeholder={targetLanguage === 'et' ? "Otsi sõnu..." : "Search words..."}
-                        className="w-full pl-12 pr-4 py-4 rounded-2xl bg-white dark:bg-gray-800 shadow-lg border-2 border-transparent focus:border-blue-500 outline-none text-lg text-gray-900 dark:text-white placeholder-gray-400"
+                        className="w-full pl-12 pr-4 py-3.5 sm:py-4 rounded-2xl bg-white dark:bg-gray-800 shadow-lg border-2 border-transparent focus:border-blue-500 outline-none text-base sm:text-lg text-gray-900 dark:text-white placeholder-gray-400"
                         onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                                 triggerExternalSearch();
@@ -239,9 +241,9 @@ export default function DictionaryPage() {
                                             setSelectedWord(null);
                                             setWiktionaryResult(null);
                                         }}
-                                        className="text-white/80 hover:text-white transition-colors"
+                                        className="text-white/80 hover:text-white transition-colors flex items-center gap-2 text-sm"
                                     >
-                                        ← Back to search
+                                        <ArrowLeft className="w-4 h-4" /> Back
                                     </button>
                                     <span className="text-sm bg-white/20 px-3 py-1 rounded-full">
                                         Rank #{selectedWord.rank}
@@ -256,8 +258,8 @@ export default function DictionaryPage() {
                                         <Volume2 className={`w-6 h-6 ${isSpeaking ? 'animate-pulse' : ''}`} />
                                     </button>
                                     <div>
-                                        <h2 className="text-3xl font-bold">{selectedWord.word}</h2>
-                                        <p className="text-xl text-white/80">{selectedWord.translation}</p>
+                                        <h2 className="text-2xl sm:text-3xl font-bold">{selectedWord.word}</h2>
+                                        <p className="text-lg sm:text-xl text-white/80">{selectedWord.translation}</p>
                                     </div>
                                 </div>
                                 <div className="mt-4">

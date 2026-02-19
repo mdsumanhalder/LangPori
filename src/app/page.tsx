@@ -37,13 +37,13 @@ export default function HomePage() {
   return (
     <div className="min-h-screen p-4 sm:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-8">
-        <header className="flex items-center justify-between">
+        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold">Your Library</h1>
-            <p className="text-muted-foreground">Manage your texts and progress</p>
+            <h1 className="text-2xl sm:text-3xl font-bold">Your Library</h1>
+            <p className="text-sm sm:text-base text-muted-foreground">Manage your texts and progress</p>
           </div>
-          <Link href="/import">
-            <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30">
+          <Link href="/import" className="w-full sm:w-auto">
+            <button className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 sm:px-4 py-2.5 sm:py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/30">
               <Plus className="w-5 h-5" />
               <span>Import Text</span>
             </button>
@@ -84,7 +84,7 @@ export default function HomePage() {
                     <span>{new Date(text.createdAt).toLocaleDateString()}</span>
                     <button
                       onClick={(e) => handleDelete(e, text.id)}
-                      className="p-2 -mr-2 text-gray-400 hover:text-red-500 transition-colors rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
+                      className="p-2 -mr-2 text-gray-400 hover:text-red-500 transition-colors rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 md:opacity-0 group-hover:opacity-100"
                       title="Delete text"
                     >
                       <Trash2 className="w-4 h-4" />

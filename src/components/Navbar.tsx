@@ -36,7 +36,7 @@ export default function Navbar() {
                                 height={32}
                                 className="rounded-lg shadow-lg shadow-teal-500/30"
                             />
-                            <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-teal-500 via-blue-600 to-indigo-600 dark:from-teal-400 dark:via-blue-400 dark:to-indigo-400">
+                            <span className="text-xl sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-teal-500 via-blue-600 to-indigo-600 dark:from-teal-400 dark:via-blue-400 dark:to-indigo-400 hidden xs:block">
                                 LangPori
                             </span>
                         </motion.div>
@@ -77,13 +77,13 @@ export default function Navbar() {
                     </div>
 
                     {/* Mobile Menu Button & Switcher */}
-                    <div className="md:hidden flex items-center gap-3">
+                    <div className="md:hidden flex items-center gap-2 sm:gap-3">
                         <LanguageSwitcher />
                         <button
                             onClick={() => setIsOpen(!isOpen)}
-                            className="p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                            className="p-1.5 sm:p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                         >
-                            {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                            {isOpen ? <X className="w-5 h-5 sm:w-6 sm:h-6" /> : <Menu className="w-5 h-5 sm:w-6 sm:h-6" />}
                         </button>
                     </div>
                 </div>

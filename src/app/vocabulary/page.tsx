@@ -39,13 +39,13 @@ export default function VocabularyPage() {
     return (
         <div className="min-h-screen p-4 sm:p-6 lg:p-8">
             <div className="max-w-4xl mx-auto space-y-6">
-                <header className="flex items-center gap-4">
+                <header className="flex items-center gap-3 sm:gap-4">
                     <Link href="/" className="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-                        <ArrowLeft className="w-6 h-6" />
+                        <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
                     </Link>
-                    <h1 className="text-2xl font-bold flex items-center gap-2">
-                        <Book className="w-6 h-6 text-blue-600" />
-                        Vocabulary ({words.length})
+                    <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2 truncate">
+                        <Book className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600 flex-shrink-0" />
+                        <span className="truncate">Vocabulary ({words.length})</span>
                     </h1>
                 </header>
 
@@ -89,7 +89,7 @@ export default function VocabularyPage() {
                                     </div>
                                     <button
                                         onClick={(e) => handleDelete(e, word.id)}
-                                        className="p-2 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                                        className="p-2 text-gray-300 hover:text-red-500 transition-colors md:opacity-0 group-hover:opacity-100"
                                     >
                                         <Trash2 className="w-4 h-4" />
                                     </button>

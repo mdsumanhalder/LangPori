@@ -209,6 +209,25 @@
     @apply hover:bg-slate-200 dark:hover:bg-slate-600;
     @apply transition-all duration-300;
   }
+
+  /* Responsive visibility */
+  .touch-only {
+    display: none;
+  }
+
+  @media (pointer: coarse) {
+    .touch-only {
+      display: block;
+    }
+    .no-touch {
+      display: none;
+    }
+  }
+
+  /* Improved container padding for mobile */
+  .safe-px {
+    @apply px-4 sm:px-6 lg:px-8;
+  }
 }
 
 @layer utilities {

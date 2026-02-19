@@ -137,9 +137,9 @@ export default function ReaderPage() {
                 <header className="mb-8 flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         <Link href="/" className="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-                            <ArrowLeft className="w-6 h-6" />
+                            <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
                         </Link>
-                        <h1 className="text-3xl font-bold line-clamp-1">{text.title}</h1>
+                        <h1 className="text-xl sm:text-3xl font-bold line-clamp-1">{text.title}</h1>
                     </div>
                     <div className="flex gap-2">
                         {(isSpeaking || isPaused) && (
@@ -164,7 +164,7 @@ export default function ReaderPage() {
                     </div>
                 </header>
 
-                <div className="prose dark:prose-invert max-w-none text-xl leading-loose font-serif">
+                <div className="prose dark:prose-invert max-w-none text-lg sm:text-xl leading-loose font-serif">
                     <p>
                         {tokens.map((token, index) => {
                             const currentStart = charIndex;
@@ -207,10 +207,11 @@ export default function ReaderPage() {
             {/* Translation Popup */}
             {selectedWord && (
                 <div
-                    className="fixed z-50 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-4 w-64 animate-in fade-in zoom-in duration-200"
+                    className="fixed z-50 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 p-5 w-[calc(100%-2rem)] sm:w-72 animate-in fade-in slide-in-from-bottom-4 zoom-in-95 duration-200"
                     style={{
-                        left: Math.min(window.innerWidth - 270, Math.max(10, selectedWord.position.x - 100)), // Clamp to screen
-                        top: selectedWord.position.y
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        bottom: '2rem',
                     }}
                 >
                     <div className="flex justify-between items-start mb-2">

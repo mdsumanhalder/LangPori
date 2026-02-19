@@ -228,11 +228,11 @@ export default function ImportPage() {
     return (
         <div className="min-h-screen p-4 sm:p-6 lg:p-8">
             <div className="max-w-3xl mx-auto space-y-6">
-                <header className="flex items-center gap-4">
+                <header className="flex items-center gap-3 sm:gap-4">
                     <Link href="/" className="p-2 -ml-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-                        <ArrowLeft className="w-6 h-6" />
+                        <ArrowLeft className="w-5 h-5 sm:w-6 sm:h-6" />
                     </Link>
-                    <h1 className="text-2xl font-bold">Import Text</h1>
+                    <h1 className="text-xl sm:text-2xl font-bold">Import Text</h1>
                 </header>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -261,8 +261,8 @@ export default function ImportPage() {
                             className="w-full flex items-center justify-center gap-2 p-4 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors text-gray-600 dark:text-gray-400"
                         >
                             {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ImageIcon className="w-5 h-5" />}
-                            <span>{isProcessing ? processingStatus : 'Import Image'}</span>
-                            <ChevronDown className={`w-4 h-4 transition-transform ${showImageOptions ? 'rotate-180' : ''}`} />
+                            <span className="truncate">{isProcessing ? processingStatus : 'Import Image'}</span>
+                            <ChevronDown className={`w-4 h-4 flex-shrink-0 transition-transform ${showImageOptions ? 'rotate-180' : ''}`} />
                         </button>
 
                         {showImageOptions && !isProcessing && (
@@ -339,8 +339,8 @@ export default function ImportPage() {
                             value={content}
                             onChange={(e) => setContent(e.target.value)}
                             placeholder="Paste your Estonian text here..."
-                            rows={15}
-                            className="w-full px-4 py-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all resize-none font-serif text-lg leading-relaxed"
+                            rows={8}
+                            className="w-full px-4 py-3 rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all resize-none font-serif text-base sm:text-lg leading-relaxed sm:rows-15"
                             required
                         />
                     </div>
@@ -349,7 +349,7 @@ export default function ImportPage() {
                         <button
                             type="submit"
                             disabled={isSaving || !title.trim() || !content.trim() || isProcessing}
-                            className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-500/30 font-medium"
+                            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-4 sm:py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-blue-500/30 font-medium"
                         >
                             {isSaving ? (
                                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

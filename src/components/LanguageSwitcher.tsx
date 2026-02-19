@@ -30,11 +30,11 @@ export function LanguageSwitcher() {
                 <button
                     onClick={() => setActiveModal(activeModal === 'native' ? null : 'native')}
                     className={`flex items-center gap-1 text-sm font-medium transition-colors ${activeModal === 'native'
-                            ? 'text-blue-600 dark:text-blue-400'
-                            : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+                        ? 'text-blue-600 dark:text-blue-400'
+                        : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
                         }`}
                 >
-                    <span className="opacity-70">I know</span>
+                    <span className="opacity-70 hidden sm:inline">I know</span>
                     <span className="font-bold">{getLanguageName(nativeLanguage)}</span>
                     <ChevronDown className={`w-3 h-3 opacity-50 transition-transform ${activeModal === 'native' ? 'rotate-180' : ''}`} />
                 </button>
@@ -52,11 +52,11 @@ export function LanguageSwitcher() {
                 <button
                     onClick={() => setActiveModal(activeModal === 'target' ? null : 'target')}
                     className={`flex items-center gap-1 text-sm font-medium transition-colors ${activeModal === 'target'
-                            ? 'text-blue-600 dark:text-blue-400'
-                            : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+                        ? 'text-blue-600 dark:text-blue-400'
+                        : 'text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
                         }`}
                 >
-                    <span className="opacity-70">I&apos;m learning</span>
+                    <span className="opacity-70 hidden sm:inline">I&apos;m learning</span>
                     <span className="font-bold">{getLanguageName(targetLanguage)}</span>
                     <ChevronDown className={`w-3 h-3 opacity-50 transition-transform ${activeModal === 'target' ? 'rotate-180' : ''}`} />
                 </button>
