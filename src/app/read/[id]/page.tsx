@@ -3,11 +3,12 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db, type Text } from '@/db/db';
-import { ArrowLeft, Volume2, Save, X, Loader2, Play, Pause, Square, SkipBack, SkipForward, Sun, Moon, Minus, Plus, Type, Settings } from 'lucide-react';
+import { ArrowLeft, Volume2, Save, X, Loader2, Play, Pause, Square, SkipBack, SkipForward, Sun, Moon, Minus, Plus, Type, Settings, ZoomIn, ZoomOut } from 'lucide-react';
 import Link from 'next/link';
 import { useSpeech } from '@/hooks/useSpeech';
 import { useAppSelector } from '@/store';
 import { motion, AnimatePresence } from 'framer-motion';
+import PdfReader from '@/components/reader/PdfReader';
 
 const WORDS_PER_PAGE = 200;
 
@@ -15,15 +16,16 @@ const WORDS_PER_PAGE = 200;
 interface ReaderSettings {
     fontSize: number; // percentage, e.g. 100
     darkMode: boolean; // reader-local dark mode
+    pdfScale: number; // For Book Mode
 }
 
 function getStoredSettings(): ReaderSettings {
-    if (typeof window === 'undefined') return { fontSize: 100, darkMode: false };
+    if (typeof window === 'undefined') return { fontSize: 100, darkMode: false, pdfScale: 1.5 };
     try {
         const stored = localStorage.getItem('readerSettings');
-        if (stored) return JSON.parse(stored);
+        if (stored) return { ...{ fontSize: 100, darkMode: false, pdfScale: 1.5 }, ...JSON.parse(stored) };
     } catch { /* ignore */ }
-    return { fontSize: 100, darkMode: false };
+    return { fontSize: 100, darkMode: false, pdfScale: 1.5 };
 }
 
 function storeSettings(settings: ReaderSettings) {
@@ -47,7 +49,11 @@ export default function ReaderPage() {
 
     // Aa Settings
     const [showAaPanel, setShowAaPanel] = useState(false);
-    const [readerSettings, setReaderSettings] = useState<ReaderSettings>({ fontSize: 100, darkMode: false });
+    const [readerSettings, setReaderSettings] = useState<ReaderSettings>({ fontSize: 100, darkMode: false, pdfScale: 1.5 });
+
+    // PDF State
+    const [numPdfPages, setNumPdfPages] = useState(0);
+    const [isPdfRendering, setIsPdfRendering] = useState(false);
 
     const { speak, speakStateless, isSpeaking, stopSpeaking, pauseSpeaking, resumeSpeaking, isPaused, currentWordRange, playbackRate, setPlaybackRate } = useSpeech();
 
@@ -97,7 +103,7 @@ export default function ReaderPage() {
         return result;
     }, [text]);
 
-    const totalPages = pages.length;
+    const totalPages = text?.pdfBlob ? numPdfPages : pages.length;
     const pageContent = pages[currentPage] || '';
 
 
@@ -177,15 +183,26 @@ export default function ReaderPage() {
     }, [readerSettings.darkMode, updateSettings]);
 
     // Handle Word Click
-    const handleWordClick = async (e: React.MouseEvent<HTMLSpanElement>, word: string) => {
+    const handleWordClick = async (e: React.MouseEvent<HTMLSpanElement> | { x: number, y: number }, word: string) => {
         const cleanWord = word.replace(/[.,!?;:()\"]/g, '').trim();
         if (!cleanWord) return;
 
-        const rect = e.currentTarget.getBoundingClientRect();
-        const position = {
-            x: rect.left + window.scrollX,
-            y: rect.bottom + window.scrollY + 10
-        };
+        let position = { x: 0, y: 0 };
+
+        if ('x' in e && 'y' in e) {
+            // Position from PDF reader
+            position = {
+                x: e.x + window.scrollX,
+                y: e.y + window.scrollY + 20
+            };
+        } else if ('currentTarget' in e) {
+            // Position from standard text spans
+            const rect = (e as React.MouseEvent<HTMLSpanElement>).currentTarget.getBoundingClientRect();
+            position = {
+                x: rect.left + window.scrollX,
+                y: rect.bottom + window.scrollY + 10
+            };
+        }
 
         setSelectedWord({ word: cleanWord, translation: null, position });
         setTranslating(true);
@@ -262,41 +279,54 @@ export default function ReaderPage() {
 
             {/* Reader Content */}
             <main className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-36">
-                <div
-                    className={`prose max-w-none leading-loose font-serif ${readerText} transition-all duration-300`}
-                    style={{ fontSize: `${readerSettings.fontSize}%` }}
-                >
-                    <p className="whitespace-pre-wrap">
-                        {tokens.map((token, index) => {
-                            const currentStart = charIndex;
-                            const currentEnd = currentStart + token.length;
-                            charIndex += token.length;
+                {text.pdfBlob ? (
+                    <div className="flex justify-center">
+                        <PdfReader
+                            blob={text.pdfBlob}
+                            pageNumber={currentPage + 1}
+                            scale={readerSettings.pdfScale}
+                            onWordClick={(word, position) => handleWordClick(position, word)}
+                            onLoad={setNumPdfPages}
+                            onRenderingUpdate={setIsPdfRendering}
+                        />
+                    </div>
+                ) : (
+                    <div
+                        className={`prose max-w-none leading-loose font-serif ${readerText} transition-all duration-300`}
+                        style={{ fontSize: `${readerSettings.fontSize}%` }}
+                    >
+                        <p className="whitespace-pre-wrap">
+                            {tokens.map((token, index) => {
+                                const currentStart = charIndex;
+                                const currentEnd = currentStart + token.length;
+                                charIndex += token.length;
 
-                            const isHighlighted = currentWordRange &&
-                                currentWordRange.start >= currentStart &&
-                                currentWordRange.start < currentEnd;
+                                const isHighlighted = currentWordRange &&
+                                    currentWordRange.start >= currentStart &&
+                                    currentWordRange.start < currentEnd;
 
-                            if (/^[\s.,!?;:()\"]+$/.test(token)) {
-                                return <span key={index} className={isHighlighted ? "bg-amber-300/60 dark:bg-amber-700/60 rounded" : ""}>{token}</span>;
-                            }
+                                if (/^[\s.,!?;:()\"]+$/.test(token)) {
+                                    return <span key={index} className={isHighlighted ? "bg-amber-300/60 dark:bg-amber-700/60 rounded" : ""}>{token}</span>;
+                                }
 
-                            return (
-                                <span
-                                    key={index}
-                                    onClick={(e) => handleWordClick(e, token)}
-                                    className={`cursor-pointer rounded px-0.5 transition-colors ${isHighlighted
-                                        ? 'bg-amber-300/60 rounded'
-                                        : readerSettings.darkMode
-                                            ? 'hover:bg-gray-800 hover:text-blue-400'
-                                            : 'hover:bg-blue-100 hover:text-blue-600'
-                                        }`}
-                                >
-                                    {token}
-                                </span>
-                            );
-                        })}
-                    </p>
-                </div>
+                                return (
+                                    <span
+                                        key={index}
+                                        onClick={(e) => handleWordClick(e, token)}
+                                        className={`cursor-pointer rounded px-0.5 transition-colors ${isHighlighted
+                                            ? 'bg-amber-300/60 rounded'
+                                            : readerSettings.darkMode
+                                                ? 'hover:bg-gray-800 hover:text-blue-400'
+                                                : 'hover:bg-blue-100 hover:text-blue-600'
+                                            }`}
+                                    >
+                                        {token}
+                                    </span>
+                                );
+                            })}
+                        </p>
+                    </div>
+                )}
             </main>
 
             {/* ===== BOTTOM TOOLBAR ===== */}
@@ -325,7 +355,7 @@ export default function ReaderPage() {
                     {/* Previous Page */}
                     <button
                         onClick={goToPrevPage}
-                        disabled={currentPage === 0}
+                        disabled={currentPage === 0 || isPdfRendering}
                         className={`p-2 transition-colors disabled:opacity-30 ${readerSettings.darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'}`}
                     >
                         <SkipBack className="w-6 h-6 fill-current" />
@@ -355,7 +385,7 @@ export default function ReaderPage() {
                     {/* Next Page */}
                     <button
                         onClick={goToNextPage}
-                        disabled={currentPage >= totalPages - 1}
+                        disabled={currentPage >= totalPages - 1 || isPdfRendering}
                         className={`p-2 transition-colors disabled:opacity-30 ${readerSettings.darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'}`}
                     >
                         <SkipForward className="w-6 h-6 fill-current" />
@@ -459,6 +489,32 @@ export default function ReaderPage() {
                                     ))}
                                 </div>
                             </div>
+
+                            {/* PDF Zoom (Only for Book Mode) */}
+                            {text?.pdfBlob && (
+                                <div>
+                                    <h3 className={`text-sm font-semibold mb-3 ${readerSettings.darkMode ? 'text-gray-400' : 'text-gray-500'}`}>PDF Zoom</h3>
+                                    <div className="flex items-center gap-3">
+                                        <button
+                                            onClick={() => updateSettings({ pdfScale: Math.max(0.5, readerSettings.pdfScale - 0.25) })}
+                                            disabled={readerSettings.pdfScale <= 0.5 || isPdfRendering}
+                                            className={`flex-1 py-3 rounded-full text-center font-bold transition-all disabled:opacity-30 ${readerSettings.darkMode ? 'bg-gray-800 text-gray-300 hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                                        >
+                                            <ZoomOut className="w-5 h-5 mx-auto" />
+                                        </button>
+                                        <span className={`font-bold text-lg tabular-nums min-w-[4rem] text-center ${readerSettings.darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                            {Math.round(readerSettings.pdfScale * 100)}%
+                                        </span>
+                                        <button
+                                            onClick={() => updateSettings({ pdfScale: Math.min(3, readerSettings.pdfScale + 0.25) })}
+                                            disabled={readerSettings.pdfScale >= 3 || isPdfRendering}
+                                            className={`flex-1 py-3 rounded-full text-center font-bold transition-all disabled:opacity-30 ${readerSettings.darkMode ? 'bg-gray-800 text-gray-300 hover:bg-gray-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                                        >
+                                            <ZoomIn className="w-5 h-5 mx-auto" />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </motion.div>
                     </>
                 )}

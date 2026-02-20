@@ -24,6 +24,8 @@ export default function ImportPage() {
     const [isSaving, setIsSaving] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [processingStatus, setProcessingStatus] = useState('');
+    const [isBookMode, setIsBookMode] = useState(false);
+    const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
 
     // Camera state
     const [showCamera, setShowCamera] = useState(false);
@@ -44,6 +46,7 @@ export default function ImportPage() {
             await db.texts.add({
                 title,
                 content,
+                pdfBlob: pdfBlob || undefined,
                 createdAt: Date.now()
             });
             router.push('/');
@@ -62,6 +65,7 @@ export default function ImportPage() {
         // Auto-clear and set title from filename
         setTitle(file.name.replace(/\.[^/.]+$/, ""));
         setContent('');
+        setPdfBlob(null);
 
         if (file.type === 'text/plain' || file.name.endsWith('.md')) {
             const reader = new FileReader();
@@ -70,8 +74,63 @@ export default function ImportPage() {
                 setContent(text);
             };
             reader.readAsText(file);
+        } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+            processPdfFile(file);
         } else {
-            alert('Please upload a .txt or .md file');
+            alert('Please upload a .txt, .md, or .pdf file');
+        }
+    };
+
+    const processPdfFile = async (file: File) => {
+        setIsProcessing(true);
+        setProcessingStatus('Loading PDF...');
+
+        try {
+            const pdfjs = await import('pdfjs-dist');
+            // Set worker source to local public folder
+            pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                const arrayBuffer = event.target?.result as ArrayBuffer;
+
+                // Store the original blob
+                setPdfBlob(file);
+
+                try {
+                    const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
+                    let fullText = '';
+
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        setProcessingStatus(`Extracting page ${i} of ${pdf.numPages}...`);
+                        const page = await pdf.getPage(i);
+                        const textContent = await page.getTextContent();
+                        const pageText = textContent.items
+                            .map((item: any) => item.str)
+                            .join(' ');
+                        fullText += pageText + '\n\n';
+                    }
+
+                    const { content: cleanContent } = processOCRResult(fullText);
+                    if (cleanContent.trim()) {
+                        setContent(cleanContent);
+                    } else {
+                        alert('No readable text found in PDF.');
+                    }
+                } catch (pdfError) {
+                    console.error('PDF parsing error:', pdfError);
+                    alert('Failed to parse PDF content.');
+                } finally {
+                    setIsProcessing(false);
+                    setProcessingStatus('');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        } catch (error) {
+            console.error('Failed to load pdfjs:', error);
+            alert('Failed to initialize PDF processor.');
+            setIsProcessing(false);
+            setProcessingStatus('');
         }
     };
 
@@ -293,7 +352,7 @@ export default function ImportPage() {
                             type="file"
                             ref={fileInputRef}
                             onChange={handleFileUpload}
-                            accept=".txt,.md"
+                            accept=".txt,.md,.pdf"
                             className="hidden"
                         />
                     </button>
@@ -389,6 +448,39 @@ export default function ImportPage() {
                             required
                         />
                     </div>
+
+                    {/* Book Mode Toggle (PDF Only) */}
+                    <AnimatePresence>
+                        {pdfBlob && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="overflow-hidden"
+                            >
+                                <div className="bg-blue-50/50 dark:bg-blue-900/10 rounded-2xl p-5 border border-blue-100 dark:border-blue-900/30 flex items-center justify-between gap-4">
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <ImageIcon className="w-4 h-4 text-blue-600" />
+                                            <h3 className="font-semibold text-slate-900 dark:text-slate-100">Book Mode (Layout Preservation)</h3>
+                                        </div>
+                                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                                            Keep the original PDF layout with images and formatting. Highly recommended for books and study materials.
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsBookMode(!isBookMode)}
+                                        className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${isBookMode ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-700'}`}
+                                    >
+                                        <span
+                                            className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${isBookMode ? 'translate-x-5' : 'translate-x-0'}`}
+                                        />
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
                     <div className="flex justify-end pt-4">
                         <button

@@ -4,6 +4,7 @@ interface Text {
     id: number;
     title: string;
     content: string;
+    pdfBlob?: Blob; // Store original PDF for Book Mode
     createdAt: number;
 }
 
@@ -23,7 +24,7 @@ const db = new Dexie('LearnEestiDB') as Dexie & {
 };
 
 // Schema declaration:
-db.version(2).stores({
+db.version(3).stores({
     texts: '++id, title, createdAt',
     words: '++id, original, srsLevel, nextReview, createdAt'
 });

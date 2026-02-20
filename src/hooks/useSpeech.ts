@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { getAllAudioUrls } from 'google-tts-api';
 
 interface UseSpeechReturn {
-    speak: (text: string, lang?: string, options?: { highlight?: boolean }) => Promise<void>;
+    speak: (text: string, lang?: string, options?: { highlight?: boolean, onEnd?: () => void }) => Promise<void>;
     startRecording: () => Promise<void>;
     stopRecording: () => string;
     isRecording: boolean;
@@ -280,7 +280,7 @@ export function useSpeech(): UseSpeechReturn {
     }, []);
 
 
-    const speak = useCallback(async (text: string, lang: string = 'et', options: { highlight?: boolean } = {}): Promise<void> => {
+    const speak = useCallback(async (text: string, lang: string = 'et', options: { highlight?: boolean, onEnd?: () => void } = {}): Promise<void> => {
         return new Promise((resolve, reject) => {
             try {
                 stopSpeaking(); // Use the new function to clear previous state
@@ -294,14 +294,24 @@ export function useSpeech(): UseSpeechReturn {
 
                 // 1. Try Google TTS first (High Quality + Chunk Highlighting)
                 tryGoogleTTS(text, lang, token)
-                    .then(resolve)
+                    .then(() => {
+                        if (token === playbackTokenRef.current) {
+                            options.onEnd?.();
+                        }
+                        resolve();
+                    })
                     .catch((err) => {
                         console.warn('Google TTS failed, falling back to Browser TTS:', err);
 
                         // 2. Fallback to Browser TTS (Robotic + Word Highlighting)
                         return trySpeechSynthesis(text, lang, token);
                     })
-                    .then(resolve)
+                    .then(() => {
+                        if (token === playbackTokenRef.current) {
+                            options.onEnd?.();
+                        }
+                        resolve();
+                    })
                     .catch(reject)
                     .finally(() => {
                         if (token !== playbackTokenRef.current) return;
