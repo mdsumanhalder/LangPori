@@ -509,7 +509,7 @@ export default function ImportPage() {
             setBookStatus(`Reading PDF page ${i} of ${pdf.numPages}...`);
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
-            const pageText = textContent.items.map((item: { str?: string }) => item.str || '').join(' ');
+            const pageText = textContent.items.map((item) => ('str' in item ? item.str : '')).join(' ');
             fullText += pageText + '\n\n';
         }
         return {
