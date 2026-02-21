@@ -2,13 +2,19 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { db, type Text } from '@/db/db';
-import { ArrowLeft, Volume2, Save, X, Loader2, Play, Pause, Square, SkipBack, SkipForward, Sun, Moon, Minus, Plus, Type, Settings, ZoomIn, ZoomOut } from 'lucide-react';
+import { db, type Text, updateUserScore, addQuizResult, incrementGamesPlayed, getQuizResultsByStory } from '@/db/db';
+import { ArrowLeft, Volume2, Save, X, Loader2, Play, Pause, Square, SkipBack, SkipForward, Sun, Moon, Settings, ZoomIn, ZoomOut, Star, ArrowRight } from 'lucide-react';
 import Link from 'next/link';
 import { useSpeech } from '@/hooks/useSpeech';
 import { useAppSelector } from '@/store';
 import { motion, AnimatePresence } from 'framer-motion';
 import PdfReader from '@/components/reader/PdfReader';
+import StoryGame from '@/components/reader/StoryGame';
+import StoryQuiz from '@/components/reader/StoryQuiz';
+import { generateGameContent, getGameQuestionCount, StoryGame as GameData } from '@/lib/gameGenerator';
+import { generateQuiz, Quiz } from '@/lib/quizGenerator';
+import { useToast } from '@/contexts/ToastContext';
+import { franc } from 'franc-min';
 
 const WORDS_PER_PAGE = 200;
 
@@ -54,8 +60,17 @@ export default function ReaderPage() {
     // PDF State
     const [numPdfPages, setNumPdfPages] = useState(0);
     const [isPdfRendering, setIsPdfRendering] = useState(false);
+    const [pdfText, setPdfText] = useState('');
+    const [accumulatedPdfText, setAccumulatedPdfText] = useState<Map<number, string>>(new Map());
+    const [isAutoPlaying, setIsAutoPlaying] = useState(false);
+    const [view, setView] = useState<'reader' | 'game' | 'quiz'>('reader');
+    const [showFinishPrompt, setShowFinishPrompt] = useState(false);
+    const [gameData, setGameData] = useState<GameData | null>(null);
+    const [quizData, setQuizData] = useState<Quiz | null>(null);
+    const [quizStartTime, setQuizStartTime] = useState<number>(0);
 
     const { speak, speakStateless, isSpeaking, stopSpeaking, pauseSpeaking, resumeSpeaking, isPaused, currentWordRange, playbackRate, setPlaybackRate } = useSpeech();
+    const toast = useToast();
 
     // Load settings on mount
     useEffect(() => {
@@ -69,6 +84,18 @@ export default function ReaderPage() {
             const id = parseInt(Array.isArray(params.id) ? params.id[0] : params.id);
             const foundText = await db.texts.get(id);
             if (foundText) {
+                // Auto-detect language if missing (repair legacy data)
+                if (!foundText.language) {
+                    const lang3 = franc(foundText.content);
+                    const langMap2: Record<string, string> = {
+                        'eng': 'en', 'est': 'et', 'swe': 'sv', 'fin': 'fi', 'nor': 'no',
+                        'dan': 'da', 'nld': 'nl', 'deu': 'de', 'fra': 'fr', 'spa': 'es',
+                        'ita': 'it', 'rus': 'ru', 'por': 'pt', 'pol': 'pl', 'zlm': 'et'
+                    };
+                    const detectedLang = langMap2[lang3] || 'et';
+                    await db.texts.update(id, { language: detectedLang });
+                    foundText.language = detectedLang;
+                }
                 setText(foundText);
             } else {
                 router.push('/');
@@ -109,42 +136,46 @@ export default function ReaderPage() {
 
 
 
-    const announceAndReadPage = useCallback(async (pageNum: number, pageText: string) => {
-        // Announce the page number first, then read the content
-        const announcement = nativeLanguage === 'et' ? `Lehekülg ${pageNum}` : `Page ${pageNum}`;
-        await speakStateless(announcement, nativeLanguage);
-        // Small delay before reading content
-        await new Promise(resolve => setTimeout(resolve, 300));
-        speak(pageText, targetLanguage, { highlight: true });
-    }, [nativeLanguage, targetLanguage, speakStateless, speak]);
-
-    const goToNextPage = useCallback(() => {
+    // --- Navigation ---
+    const goToNextPage = useCallback((): void => {
         if (currentPage < totalPages - 1) {
             stopSpeaking();
-            const nextPage = currentPage + 1;
-            setCurrentPage(nextPage);
+            setPdfText(''); // Clear previous page text
+            setCurrentPage(prev => prev + 1);
             window.scrollTo({ top: 0, behavior: 'smooth' });
-            // Announce page and auto-read
-            const nextPageContent = pages[nextPage];
-            if (nextPageContent) {
-                setTimeout(() => announceAndReadPage(nextPage + 1, nextPageContent), 200);
-            }
+        } else {
+            setIsAutoPlaying(false);
+            setShowFinishPrompt(true);
         }
-    }, [currentPage, totalPages, stopSpeaking, pages, announceAndReadPage]);
+    }, [totalPages, stopSpeaking, currentPage]);
 
-    const goToPrevPage = useCallback(() => {
+    const goToPrevPage = useCallback((): void => {
         if (currentPage > 0) {
             stopSpeaking();
-            const prevPage = currentPage - 1;
-            setCurrentPage(prevPage);
+            setPdfText(''); // Clear previous page text
+            setIsAutoPlaying(false);
+            setCurrentPage(prev => prev - 1);
             window.scrollTo({ top: 0, behavior: 'smooth' });
-            // Announce page and auto-read
-            const prevPageContent = pages[prevPage];
-            if (prevPageContent) {
-                setTimeout(() => announceAndReadPage(prevPage + 1, prevPageContent), 200);
-            }
         }
-    }, [currentPage, stopSpeaking, pages, announceAndReadPage]);
+    }, [stopSpeaking, currentPage]);
+
+    // Handle automatic page continuation and continuous read
+    useEffect(() => {
+        const contentToRead = text?.pdfBlob ? pdfText : pages[currentPage];
+
+        if (isAutoPlaying && contentToRead && !isSpeaking && !isPaused) {
+            // Small delay to allow the UI/PDF to settle if we just changed pages
+            const timer = setTimeout(() => {
+                speak(contentToRead, targetLanguage, {
+                    highlight: true,
+                    onEnd: () => {
+                        goToNextPage();
+                    }
+                });
+            }, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [isAutoPlaying, isSpeaking, isPaused, pdfText, pages, currentPage, text?.pdfBlob, targetLanguage, speak, totalPages, goToNextPage]);
 
     // --- Audio ---
     const handleToggleAudio = useCallback(() => {
@@ -152,13 +183,14 @@ export default function ReaderPage() {
             pauseSpeaking();
         } else if (isPaused) {
             resumeSpeaking();
-        } else if (pageContent) {
-            speak(pageContent, targetLanguage, { highlight: true });
+        } else {
+            setIsAutoPlaying(true);
         }
-    }, [isSpeaking, isPaused, pageContent, targetLanguage, speak, pauseSpeaking, resumeSpeaking]);
+    }, [isSpeaking, isPaused, pauseSpeaking, resumeSpeaking]);
 
     const handleStop = useCallback(() => {
         stopSpeaking();
+        setIsAutoPlaying(false);
     }, [stopSpeaking]);
 
     // --- Aa Settings ---
@@ -233,15 +265,116 @@ export default function ReaderPage() {
                 original: selectedWord.word,
                 translation: selectedWord.translation,
                 context: text?.content.substring(0, 100) || "",
+                language: text?.language || targetLanguage,
                 srsLevel: 0,
                 nextReview: Date.now(),
                 createdAt: Date.now()
             });
-            alert("Saved to Flashcards!");
+            toast({ message: 'Saved to Flashcards!', type: 'success' });
             setSelectedWord(null);
         } catch (e) {
             console.error("Failed to save", e);
         }
+    };
+
+    // Accumulate PDF text as user reads pages
+    const handlePdfTextExtracted = useCallback((extractedText: string) => {
+        setPdfText(extractedText);
+        if (extractedText && extractedText.trim().length > 0) {
+            setAccumulatedPdfText(prev => {
+                const newMap = new Map(prev);
+                newMap.set(currentPage, extractedText);
+                return newMap;
+            });
+        }
+    }, [currentPage]);
+
+    const handleStartGame = async () => {
+        if (!text) return;
+
+        let contentForGame: string;
+        
+        if (text.pdfBlob) {
+            // For PDFs, combine all accumulated text from read pages
+            const allPdfText = Array.from(accumulatedPdfText.values()).join('\n\n');
+            contentForGame = allPdfText || pdfText || text.content || '';
+        } else {
+            // For regular text, use the full content
+            contentForGame = text.content;
+        }
+
+        console.log(`[Reader] Content for game: ${contentForGame?.length || 0} chars, isPdf: ${!!text.pdfBlob}, pages accumulated: ${accumulatedPdfText.size}`);
+
+        // Fetch saved words for this story's language
+        const allSavedWords = await db.words.toArray();
+        const filteredWords = allSavedWords.filter(w => w.language === text.language);
+        console.log(`[Reader] Starting game for "${text.title}" in "${text.language}". Flashcards found: ${filteredWords.length}`);
+
+        const gameContent = contentForGame || '';
+        const gameWordCount = gameContent.trim().split(/\s+/).filter(Boolean).length;
+        const gameQuestionCount = getGameQuestionCount(gameWordCount);
+        const data = generateGameContent(gameContent, text.title, filteredWords, text.language, gameQuestionCount);
+        console.log(`[Reader] Game generated with ${data.exercises.length} exercises (${gameWordCount} words → ${gameQuestionCount} questions)`);
+        
+        setGameData(data);
+        setView('game');
+        setShowFinishPrompt(false);
+    };
+
+    const getContentForQuiz = useCallback(() => {
+        if (!text) return '';
+        if (text.pdfBlob) {
+            const allPdfText = Array.from(accumulatedPdfText.values()).join('\n\n');
+            return allPdfText || pdfText || text.content || '';
+        }
+        return text.content;
+    }, [text, accumulatedPdfText, pdfText]);
+
+    const handleStartQuiz = async () => {
+        if (!text) return;
+        
+        const contentForQuiz = getContentForQuiz();
+        const quizWordCount = contentForQuiz.trim().split(/\s+/).filter(Boolean).length;
+        const quizQuestionCount = getGameQuestionCount(quizWordCount);
+        console.log(`[Reader] Starting quiz with ${contentForQuiz.length} chars, ${quizWordCount} words → ${quizQuestionCount} questions`);
+        
+        const quiz = generateQuiz(contentForQuiz, text.title, text.language, quizQuestionCount);
+        console.log(`[Reader] Quiz generated with ${quiz.questions.length} questions`);
+        
+        setQuizData(quiz);
+        setQuizStartTime(Date.now());
+        setView('quiz');
+        
+        // Track game completion
+        await incrementGamesPlayed();
+    };
+
+    const handleQuizComplete = async (score: number, total: number, percentage: number) => {
+        if (!text) return;
+        
+        const timeTaken = Math.round((Date.now() - quizStartTime) / 1000);
+        
+        // Save quiz result
+        await addQuizResult({
+            storyId: text.id,
+            storyTitle: text.title,
+            score,
+            totalPoints: total,
+            percentage,
+            questionsCorrect: quizData ? Math.round((percentage / 100) * quizData.questions.length) : 0,
+            totalQuestions: quizData?.questions.length || 0,
+            timeTaken,
+            completedAt: Date.now()
+        });
+        
+        // Points: first time or replay all-correct → add score; replay with wrong answers → deduct
+        const previousAttempts = await getQuizResultsByStory(text.id);
+        const isReplay = previousAttempts.length > 1; // current attempt already saved above
+        const allCorrect = score >= total;
+        const pointsToApply = isReplay ? (allCorrect ? score : score - total) : score;
+        await updateUserScore(pointsToApply, true);
+        
+        console.log(`[Reader] Quiz completed: ${score}/${total} (${percentage}%)${isReplay ? ` replay ${allCorrect ? `all correct → +${score} pts` : `wrong answers → ${pointsToApply} pts`}` : ` first time → +${score} pts`}`);
     };
 
     if (loading) {
@@ -266,137 +399,245 @@ export default function ReaderPage() {
             <header className={`sticky top-0 z-30 ${headerBg} backdrop-blur-md border-b ${readerSettings.darkMode ? 'border-gray-800' : 'border-gray-200/50'} transition-colors duration-300`}>
                 <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
                     <div className="flex items-center gap-3 min-w-0">
-                        <Link href="/" className={`p-2 -ml-2 rounded-full transition-colors ${readerSettings.darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}`}>
+                        <Link href="/" onClick={() => stopSpeaking()} className={`p-2 -ml-2 rounded-full transition-colors ${readerSettings.darkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-100'}`}>
                             <ArrowLeft className={`w-5 h-5 ${headerText}`} />
                         </Link>
                         <h1 className={`text-lg sm:text-xl font-bold line-clamp-1 ${headerText}`}>{text.title}</h1>
                     </div>
-                    <div className={`text-xs font-medium px-3 py-1 rounded-full ${readerSettings.darkMode ? 'bg-gray-800 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>
-                        {currentPage + 1} / {totalPages}
-                    </div>
+                    {view === 'reader' && (
+                        <div className={`text-xs font-medium px-3 py-1 rounded-full ${readerSettings.darkMode ? 'bg-gray-800 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>
+                            {currentPage + 1} / {totalPages}
+                        </div>
+                    )}
                 </div>
             </header>
 
-            {/* Reader Content */}
-            <main className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-36">
-                {text.pdfBlob ? (
-                    <div className="flex justify-center">
-                        <PdfReader
-                            blob={text.pdfBlob}
-                            pageNumber={currentPage + 1}
-                            scale={readerSettings.pdfScale}
-                            onWordClick={(word, position) => handleWordClick(position, word)}
-                            onLoad={setNumPdfPages}
-                            onRenderingUpdate={setIsPdfRendering}
-                        />
-                    </div>
-                ) : (
-                    <div
-                        className={`prose max-w-none leading-loose font-serif ${readerText} transition-all duration-300`}
-                        style={{ fontSize: `${readerSettings.fontSize}%` }}
-                    >
-                        <p className="whitespace-pre-wrap">
-                            {tokens.map((token, index) => {
-                                const currentStart = charIndex;
-                                const currentEnd = currentStart + token.length;
-                                charIndex += token.length;
+            {/* Main Content Area */}
+            <main className="max-w-3xl mx-auto px-4 sm:px-6 pt-4 sm:pt-5 pb-36">
+                <AnimatePresence mode="wait">
+                    {view === 'reader' ? (
+                        <motion.div
+                            key="reader"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                        >
+                            {text.pdfBlob ? (
+                                <div className="flex justify-center">
+                                    <PdfReader
+                                        blob={text.pdfBlob}
+                                        pageNumber={currentPage + 1}
+                                        scale={readerSettings.pdfScale}
+                                        onWordClick={(word, position) => handleWordClick(position, word)}
+                                        onLoad={setNumPdfPages}
+                                        onRenderingUpdate={setIsPdfRendering}
+                                        onTextExtracted={handlePdfTextExtracted}
+                                        highlightRange={currentWordRange}
+                                    />
+                                </div>
+                            ) : (
+                                <div
+                                    className={`prose prose-p:my-0 prose-p:leading-snug max-w-none font-serif ${readerText} transition-all duration-300`}
+                                    style={{ fontSize: `${readerSettings.fontSize}%` }}
+                                >
+                                    <p className="whitespace-pre-wrap leading-snug">
+                                        {tokens.map((token, index) => {
+                                            const currentStart = charIndex;
+                                            const currentEnd = currentStart + token.length;
+                                            charIndex += token.length;
 
-                                const isHighlighted = currentWordRange &&
-                                    currentWordRange.start >= currentStart &&
-                                    currentWordRange.start < currentEnd;
+                                            const isHighlighted = currentWordRange &&
+                                                currentWordRange.start >= currentStart &&
+                                                currentWordRange.start < currentEnd;
 
-                                if (/^[\s.,!?;:()\"]+$/.test(token)) {
-                                    return <span key={index} className={isHighlighted ? "bg-amber-300/60 dark:bg-amber-700/60 rounded" : ""}>{token}</span>;
-                                }
+                                            if (/^[\s.,!?;:()\"]+$/.test(token)) {
+                                                return <span key={index} className={isHighlighted ? "bg-amber-300/60 dark:bg-amber-700/60 rounded" : ""}>{token}</span>;
+                                            }
 
-                                return (
-                                    <span
-                                        key={index}
-                                        onClick={(e) => handleWordClick(e, token)}
-                                        className={`cursor-pointer rounded px-0.5 transition-colors ${isHighlighted
-                                            ? 'bg-amber-300/60 rounded'
-                                            : readerSettings.darkMode
-                                                ? 'hover:bg-gray-800 hover:text-blue-400'
-                                                : 'hover:bg-blue-100 hover:text-blue-600'
-                                            }`}
-                                    >
-                                        {token}
-                                    </span>
-                                );
-                            })}
-                        </p>
-                    </div>
-                )}
+                                            return (
+                                                <span
+                                                    key={index}
+                                                    onClick={(e) => handleWordClick(e, token)}
+                                                    className={`cursor-pointer rounded px-0.5 transition-colors ${isHighlighted
+                                                        ? 'bg-amber-300/60 rounded'
+                                                        : readerSettings.darkMode
+                                                            ? 'hover:bg-gray-800 hover:text-blue-400'
+                                                            : 'hover:bg-blue-100 hover:text-blue-600'
+                                                        }`}
+                                                >
+                                                    {token}
+                                                </span>
+                                            );
+                                        })}
+                                    </p>
+                                </div>
+                            )}
+                        </motion.div>
+                    ) : view === 'game' ? (
+                        <motion.div
+                            key="game"
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                        >
+                            {gameData && (
+                                <StoryGame
+                                    gameData={gameData}
+                                    onClose={() => setView('reader')}
+                                    onStartQuiz={handleStartQuiz}
+                                />
+                            )}
+                        </motion.div>
+                    ) : (
+                        <motion.div
+                            key="quiz"
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                        >
+                            {quizData && (
+                                <StoryQuiz
+                                    quiz={quizData}
+                                    onComplete={handleQuizComplete}
+                                    onClose={() => setView('reader')}
+                                />
+                            )}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </main>
 
-            {/* ===== BOTTOM TOOLBAR ===== */}
-            <div className={`fixed bottom-0 left-0 right-0 z-30 ${readerSettings.darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} border-t transition-colors duration-300`}>
-                {/* Progress Bar */}
-                <div className={`h-1 ${readerSettings.darkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>
-                    <div
-                        className="h-full bg-gradient-to-r from-red-400 to-orange-400 transition-all duration-300 rounded-r-full"
-                        style={{ width: `${totalPages > 1 ? ((currentPage) / (totalPages - 1)) * 100 : 100}%` }}
-                    />
-                </div>
-
-                {/* Toolbar Buttons */}
-                <div className="max-w-md mx-auto flex items-center justify-between px-6 py-3 safe-area-bottom">
-                    {/* Settings Button (formerly Aa) */}
-                    <button
-                        onClick={() => setShowAaPanel(!showAaPanel)}
-                        className={`p-2 transition-colors ${showAaPanel
-                            ? 'text-blue-500'
-                            : readerSettings.darkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-600 hover:text-gray-900'
-                            }`}
-                    >
-                        <Settings className="w-6 h-6" />
-                    </button>
-
-                    {/* Previous Page */}
-                    <button
-                        onClick={goToPrevPage}
-                        disabled={currentPage === 0 || isPdfRendering}
-                        className={`p-2 transition-colors disabled:opacity-30 ${readerSettings.darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'}`}
-                    >
-                        <SkipBack className="w-6 h-6 fill-current" />
-                    </button>
-
-                    {/* Play / Pause Button */}
-                    <div className="flex items-center gap-2">
-                        {(isSpeaking || isPaused) && (
-                            <button
-                                onClick={handleStop}
-                                className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                            >
-                                <Square className="w-4 h-4 fill-current" />
-                            </button>
-                        )}
-                        <button
-                            onClick={handleToggleAudio}
-                            className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 ${isSpeaking
-                                ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30'
-                                : 'bg-gradient-to-br from-red-400 to-orange-500 hover:from-red-500 hover:to-orange-600 text-white shadow-red-400/30'
-                                }`}
+            {/* Bottom Toolbar (Only show in reader mode) */}
+            {/* ===== Finished Prompt Modal ===== */}
+            <AnimatePresence>
+                {showFinishPrompt && (
+                    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+                            onClick={() => setShowFinishPrompt(false)}
+                        />
+                        <motion.div
+                            initial={{ y: 200, opacity: 0, scale: 0.9 }}
+                            animate={{ y: 0, opacity: 1, scale: 1 }}
+                            exit={{ y: 200, opacity: 0, scale: 0.9 }}
+                            className={`relative w-full max-w-lg ${readerSettings.darkMode ? 'bg-gray-900' : 'bg-white'} rounded-3xl shadow-2xl overflow-hidden`}
                         >
-                            {isSpeaking ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-0.5" />}
-                        </button>
+                            <div className="p-8 text-center">
+                                <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/40 rounded-full flex items-center justify-center mx-auto mb-6">
+                                    <Star className="w-8 h-8 text-blue-600 dark:text-blue-400 fill-current" />
+                                </div>
+                                <h2 className={`text-2xl font-bold mb-3 ${readerSettings.darkMode ? 'text-white' : 'text-gray-900'}`}>
+                                    You've finished the story!
+                                </h2>
+                                <p className={`mb-8 ${readerSettings.darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                    Now it's time to play a game to learn from it and reinforce your vocabulary.
+                                </p>
+
+                                <div className="flex flex-col gap-4">
+                                    <div className="flex flex-col sm:flex-row gap-4">
+                                        <button
+                                            onClick={handleStartGame}
+                                            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold transition-all shadow-lg shadow-blue-500/30 active:scale-95 flex items-center justify-center gap-2"
+                                        >
+                                            Play Game <ArrowRight className="w-5 h-5" />
+                                        </button>
+                                        <button
+                                            onClick={async () => {
+                                                setShowFinishPrompt(false);
+                                                await handleStartQuiz();
+                                            }}
+                                            className={`flex-1 bg-purple-600 hover:bg-purple-700 text-white py-4 rounded-2xl font-bold transition-all shadow-lg shadow-purple-500/30 active:scale-95 flex items-center justify-center gap-2`}
+                                        >
+                                            Skip to Test
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowFinishPrompt(false)}
+                                        className={`w-full ${readerSettings.darkMode ? 'bg-gray-800 text-gray-300 hover:bg-gray-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'} py-3 rounded-2xl font-bold transition-all`}
+                                    >
+                                        Just Finish
+                                    </button>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* ===== Bottom Toolbar ===== */}
+            {view === 'reader' && !showFinishPrompt && (
+                <div className={`fixed bottom-0 left-0 right-0 z-30 ${readerSettings.darkMode ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'} border-t transition-colors duration-300`}>
+                    {/* Progress Bar */}
+                    <div className={`h-1 ${readerSettings.darkMode ? 'bg-gray-800' : 'bg-gray-100'}`}>
+                        <div
+                            className="h-full bg-gradient-to-r from-red-400 to-orange-400 transition-all duration-300 rounded-r-full"
+                            style={{ width: `${totalPages > 1 ? ((currentPage) / (totalPages - 1)) * 100 : 100}%` }}
+                        />
                     </div>
 
-                    {/* Next Page */}
-                    <button
-                        onClick={goToNextPage}
-                        disabled={currentPage >= totalPages - 1 || isPdfRendering}
-                        className={`p-2 transition-colors disabled:opacity-30 ${readerSettings.darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'}`}
-                    >
-                        <SkipForward className="w-6 h-6 fill-current" />
-                    </button>
+                    {/* Toolbar Buttons */}
+                    <div className="max-w-md mx-auto flex items-center justify-between px-6 py-3 safe-area-bottom">
+                        {/* Settings Button */}
+                        <button
+                            onClick={() => setShowAaPanel(!showAaPanel)}
+                            className={`p-2 transition-colors ${showAaPanel
+                                ? 'text-blue-500'
+                                : readerSettings.darkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-600 hover:text-gray-900'
+                                }`}
+                        >
+                            <Settings className="w-6 h-6" />
+                        </button>
 
-                    {/* Page indicator */}
-                    <span className={`text-xs font-medium tabular-nums ${readerSettings.darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                        {currentPage + 1}/{totalPages}
-                    </span>
+                        {/* Previous Page */}
+                        <button
+                            onClick={goToPrevPage}
+                            disabled={currentPage === 0 || isPdfRendering}
+                            className={`p-2 transition-colors disabled:opacity-30 ${readerSettings.darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'}`}
+                        >
+                            <SkipBack className="w-6 h-6 fill-current" />
+                        </button>
+
+                        {/* Play / Pause Button */}
+                        <div className="flex items-center gap-2">
+                            {(isSpeaking || isPaused) && (
+                                <button
+                                    onClick={handleStop}
+                                    className="p-2 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                                >
+                                    <Square className="w-4 h-4 fill-current" />
+                                </button>
+                            )}
+                            <button
+                                onClick={handleToggleAudio}
+                                className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-all active:scale-95 ${isSpeaking
+                                    ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-amber-500/30'
+                                    : 'bg-gradient-to-br from-red-400 to-orange-500 hover:from-red-500 hover:to-orange-600 text-white shadow-red-400/30'
+                                    }`}
+                            >
+                                {isSpeaking ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-0.5" />}
+                            </button>
+                        </div>
+
+                        {/* Next Page / Finish */}
+                        <button
+                            onClick={goToNextPage}
+                            disabled={isPdfRendering}
+                            className={`p-2 transition-colors disabled:opacity-30 ${readerSettings.darkMode ? 'text-gray-300 hover:text-white' : 'text-gray-700 hover:text-gray-900'}`}
+                            title={currentPage >= totalPages - 1 ? 'Finish Reading' : 'Next Page'}
+                        >
+                            <SkipForward className={`w-6 h-6 fill-current ${currentPage >= totalPages - 1 ? 'text-green-500' : ''}`} />
+                        </button>
+
+                        {/* Page indicator */}
+                        <span className={`text-xs font-medium tabular-nums ${readerSettings.darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                            {currentPage + 1}/{totalPages}
+                        </span>
+                    </div>
                 </div>
-            </div>
+            )}
 
             {/* ===== Aa SETTINGS PANEL ===== */}
             <AnimatePresence>

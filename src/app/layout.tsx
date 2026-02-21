@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ReduxProvider } from "@/components/providers/ReduxProvider";
+import { ConfirmProvider } from "@/contexts/ConfirmContext";
+import { ToastProvider } from "@/contexts/ToastContext";
 import Navbar from "@/components/Navbar";
 import OfflineIndicator from "@/components/OfflineIndicator";
 
@@ -61,11 +63,15 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <ReduxProvider>
-          <OfflineIndicator />
-          <Navbar />
-          <main className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-gray-900 dark:via-slate-900 dark:to-indigo-950 pt-2">
-            {children}
-          </main>
+          <ConfirmProvider>
+            <ToastProvider>
+              <OfflineIndicator />
+              <Navbar />
+              <main className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-gray-900 dark:via-slate-900 dark:to-indigo-950 pt-2">
+                {children}
+              </main>
+            </ToastProvider>
+          </ConfirmProvider>
         </ReduxProvider>
       </body>
     </html>

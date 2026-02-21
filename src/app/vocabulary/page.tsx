@@ -6,8 +6,10 @@ import { db } from '@/db/db';
 import { ArrowLeft, Trash2, Search, Book } from 'lucide-react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useConfirm } from '@/contexts/ConfirmContext';
 
 export default function VocabularyPage() {
+    const confirm = useConfirm();
     const [searchQuery, setSearchQuery] = useState('');
 
     // Fetch all words
@@ -23,9 +25,14 @@ export default function VocabularyPage() {
     const handleDelete = async (e: React.MouseEvent, id: number) => {
         e.preventDefault();
         e.stopPropagation();
-        if (confirm('Delete this word?')) {
-            await db.words.delete(id);
-        }
+        const ok = await confirm({
+            title: 'Delete word?',
+            message: 'Remove this word from your vocabulary?',
+            confirmLabel: 'Delete',
+            cancelLabel: 'Cancel',
+            variant: 'danger',
+        });
+        if (ok) await db.words.delete(id);
     };
 
     if (!words) {

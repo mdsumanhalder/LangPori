@@ -42,8 +42,10 @@ export default function PdfReader({
         const loadPdf = async () => {
             try {
                 const pdfjs = await import('pdfjs-dist');
-                // Use the local worker file from public directory
-                pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+                // Use a version-matched CDN worker as it's more reliable across different environments
+                // but keep the local path as a fallback if desired.
+                // Version 4.4.168 matches package.json
+                pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs`;
 
                 const arrayBuffer = await blob.arrayBuffer();
                 const loadingTask = pdfjs.getDocument({ data: arrayBuffer });

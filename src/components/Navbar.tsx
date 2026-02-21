@@ -15,7 +15,8 @@ export default function Navbar() {
     const navItems = [
         { name: 'Library', href: '/', icon: Library },
         { name: 'Vocabulary', href: '/vocabulary', icon: BookOpen },
-        { name: 'Import', href: '/import', icon: Home }, // Temporary icon
+        { name: 'Leaderboard', href: '/leaderboard', icon: Trophy },
+        { name: 'Import', href: '/import', icon: Home },
     ];
 
     return (

@@ -50,3 +50,6 @@ public/workbox-*.js.map
 public/worker-*.js
 public/worker-*.js.map
 public/fallback-*.js
+
+# pdf.js worker (we use CDN instead)
+public/pdf.worker*.mjs
