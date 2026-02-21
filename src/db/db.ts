@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
 
-interface Text {
+export interface Text {
     id: number;
     title: string;
     content: string;
@@ -12,7 +12,7 @@ interface Text {
     createdAt: number;
 }
 
-interface Word {
+export interface Word {
     id: number;
     original: string;
     translation: string;
@@ -23,7 +23,7 @@ interface Word {
     createdAt: number;
 }
 
-interface UserScore {
+export interface UserScore {
     id: number;
     username: string;
     totalPoints: number;
@@ -37,7 +37,7 @@ interface UserScore {
     updatedAt: number;
 }
 
-interface QuizResult {
+export interface QuizResult {
     id: number;
     storyId: number;
     storyTitle: string;
@@ -50,20 +50,54 @@ interface QuizResult {
     completedAt: number;
 }
 
-const db = new Dexie('LearnEestiDB') as Dexie & {
-    texts: EntityTable<Text, 'id'>,
-    words: EntityTable<Word, 'id'>,
-    userScores: EntityTable<UserScore, 'id'>,
-    quizResults: EntityTable<QuizResult, 'id'>
+type DbInstance = Dexie & {
+    texts: EntityTable<Text, 'id'>;
+    words: EntityTable<Word, 'id'>;
+    userScores: EntityTable<UserScore, 'id'>;
+    quizResults: EntityTable<QuizResult, 'id'>;
 };
 
-// Schema declaration:
-db.version(6).stores({
-    texts: '++id, title, createdAt, language',
-    words: '++id, original, srsLevel, nextReview, createdAt, language',
-    userScores: '++id, username, totalPoints, updatedAt',
-    quizResults: '++id, storyId, score, completedAt'
-});
+function createStubDb(): DbInstance {
+    const noop = () => Promise.resolve();
+    const empty = () => Promise.resolve([]);
+    const stubTable = {
+        toArray: empty,
+        add: () => Promise.resolve(1),
+        put: noop,
+        update: noop,
+        delete: noop,
+        get: () => Promise.resolve(undefined),
+        clear: noop,
+        where: () => ({
+            equals: () => ({
+                sortBy: empty,
+                toArray: empty,
+            }),
+        }),
+    };
+    return {
+        texts: stubTable as unknown as EntityTable<Text, 'id'>,
+        words: stubTable as unknown as EntityTable<Word, 'id'>,
+        userScores: stubTable as unknown as EntityTable<UserScore, 'id'>,
+        quizResults: stubTable as unknown as EntityTable<QuizResult, 'id'>,
+        version: () => ({ stores: () => {} }),
+        open: () => Promise.resolve(),
+    } as unknown as DbInstance;
+}
+
+function createRealDb(): DbInstance {
+    const d = new Dexie('LearnEestiDB') as DbInstance;
+    d.version(6).stores({
+        texts: '++id, title, createdAt, language',
+        words: '++id, original, srsLevel, nextReview, createdAt, language',
+        userScores: '++id, username, totalPoints, updatedAt',
+        quizResults: '++id, storyId, score, completedAt',
+    });
+    return d;
+}
+
+const db: DbInstance =
+    typeof window === 'undefined' ? createStubDb() : createRealDb();
 
 // Helper functions for leaderboard
 export async function getUserScore(): Promise<UserScore | undefined> {
@@ -137,4 +171,3 @@ export async function incrementGamesPlayed(): Promise<void> {
 }
 
 export { db };
-export type { Text, Word, UserScore, QuizResult };

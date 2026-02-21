@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { Suspense, useState, useRef, useCallback, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/store';
@@ -43,7 +43,7 @@ const videoConstraints = {
     focusMode: { ideal: "continuous" } // Request continuous focus
 };
 
-export default function ImportPage() {
+function ImportPageContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const toast = useToast();
@@ -1218,5 +1218,17 @@ export default function ImportPage() {
                 </AnimatePresence>
             </div>
         </div>
+    );
+}
+
+export default function ImportPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen flex items-center justify-center">
+                <div className="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full" />
+            </div>
+        }>
+            <ImportPageContent />
+        </Suspense>
     );
 }
