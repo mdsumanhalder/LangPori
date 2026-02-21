@@ -220,6 +220,11 @@ export default function HomePage() {
                     <span className="px-2 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded-lg uppercase tracking-wider">
                       {getLanguageName(text.language || 'et')}
                     </span>
+                    {text.cefrLevel && (
+                      <span className="px-2 py-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold rounded-lg">
+                        {text.cefrLevel}
+                      </span>
+                    )}
                     {text.author && (
                       <span className="px-2 py-1 bg-slate-50 dark:bg-slate-800 text-slate-500 text-[10px] font-medium rounded-lg flex items-center gap-1">
                         <UserIcon className="w-2.5 h-2.5" /> {text.author}

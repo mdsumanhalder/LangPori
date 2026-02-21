@@ -8,6 +8,7 @@ interface Text {
     author?: string;
     isPublic?: boolean;
     language?: string;
+    cefrLevel?: string;
     createdAt: number;
 }
 

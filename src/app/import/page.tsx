@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSelector } from 'react-redux';
 import { RootState } from '@/store';
 import { db } from '@/db/db';
-import { ArrowLeft, Save, Upload, Image as ImageIcon, Loader2, Camera, X, Check, ChevronDown, Minus, Plus, Globe, Lock, User as UserIcon, FileText, BookMarked } from 'lucide-react';
+import { ArrowLeft, Save, Upload, Image as ImageIcon, Loader2, Camera, X, Check, ChevronDown, Minus, Plus, Globe, Lock, User as UserIcon, FileText, BookMarked, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import Tesseract from 'tesseract.js';
 import Webcam from 'react-webcam';
@@ -14,6 +14,8 @@ import { SUPPORTED_LANGUAGES } from '@/lib/languages';
 import { franc } from 'franc-min';
 import { extractTextFromEpub } from '@/lib/epubParser';
 import { useToast } from '@/contexts/ToastContext';
+import { detectCEFRLevel, type CEFRLevel } from '@/lib/cefrDetector';
+import { fetchSampleFromTatoeba, getRandomSampleForLanguage, hasSamplesForLanguage } from '@/lib/sampleStories';
 
 const LANG_CODES = new Set(SUPPORTED_LANGUAGES.map((l) => l.code));
 function normalizeLang(code: string): string {
@@ -64,6 +66,9 @@ export default function ImportPage() {
     const [processingStatus, setProcessingStatus] = useState('');
     const [isBookMode, setIsBookMode] = useState(false);
     const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
+    const [detectedLevel, setDetectedLevel] = useState<CEFRLevel | null>(null);
+    const [isDetectingLevel, setIsDetectingLevel] = useState(false);
+    const [isGeneratingSample, setIsGeneratingSample] = useState(false);
 
     // Import Books tab state
     const [bookError, setBookError] = useState<string | null>(null);
@@ -85,6 +90,7 @@ export default function ImportPage() {
                         setPdfBlob(text.pdfBlob);
                         setIsBookMode(true);
                     }
+                    setDetectedLevel(text.cefrLevel && ['A1','A2','B1','B2','C1','C2'].includes(text.cefrLevel) ? text.cefrLevel as CEFRLevel : null);
                 }
             });
         }
@@ -96,6 +102,27 @@ export default function ImportPage() {
             setLanguage(targetLanguage);
         }
     }, [targetLanguage, editId]);
+
+    // Debounced CEFR level detection when content or language changes
+    useEffect(() => {
+        const words = content.trim().split(/\s+/).filter(Boolean);
+        if (words.length < 20) {
+            setDetectedLevel(null);
+            return;
+        }
+        const t = setTimeout(async () => {
+            setIsDetectingLevel(true);
+            try {
+                const level = await detectCEFRLevel(content, language);
+                setDetectedLevel(level);
+            } catch {
+                setDetectedLevel(null);
+            } finally {
+                setIsDetectingLevel(false);
+            }
+        }, 600);
+        return () => clearTimeout(t);
+    }, [content, language]);
 
     // Camera state
     const [showCamera, setShowCamera] = useState(false);
@@ -109,6 +136,41 @@ export default function ImportPage() {
 
     const wordCount = content.trim() ? content.split(/\s+/).filter(w => w).length : 0;
     const isOverWordLimit = wordCount > MAX_PASTE_WORDS;
+
+    const handleAutoGenerate = async () => {
+        setIsGeneratingSample(true);
+        try {
+            let sample = await fetchSampleFromTatoeba(language);
+            if (!sample) sample = getRandomSampleForLanguage(language);
+            if (!sample) {
+                toast({ message: 'Could not load sample. Try again or paste your own text.', type: 'error' });
+                return;
+            }
+            setTitle(sample.title);
+            setAuthor(sample.author);
+            setContent(sample.content);
+            const fromTatoeba = sample.author === 'Tatoeba' || sample.title?.includes('Tatoeba');
+            if (fromTatoeba) {
+                toast({ message: 'Story filled from Tatoeba (free language database). Level will update automatically.', type: 'success' });
+            } else if (!hasSamplesForLanguage(language)) {
+                toast({ message: 'Sample in English (no Tatoeba data for this language). You can change the language or paste your own text.', type: 'info' });
+            } else {
+                toast({ message: 'Story details filled. Level will update automatically.', type: 'success' });
+            }
+        } catch {
+            const sample = getRandomSampleForLanguage(language);
+            if (sample) {
+                setTitle(sample.title);
+                setAuthor(sample.author);
+                setContent(sample.content);
+                toast({ message: 'Filled from backup sample. Level will update automatically.', type: 'info' });
+            } else {
+                toast({ message: 'Could not load sample. Try again or paste your own text.', type: 'error' });
+            }
+        } finally {
+            setIsGeneratingSample(false);
+        }
+    };
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -127,7 +189,8 @@ export default function ImportPage() {
                     author: author.trim() || undefined,
                     isPublic,
                     language,
-                    pdfBlob: pdfBlob || undefined
+                    pdfBlob: pdfBlob || undefined,
+                    cefrLevel: detectedLevel ?? undefined
                 });
             } else {
                 await db.texts.add({
@@ -137,6 +200,7 @@ export default function ImportPage() {
                     isPublic,
                     language,
                     pdfBlob: pdfBlob || undefined,
+                    cefrLevel: detectedLevel ?? undefined,
                     createdAt: Date.now()
                 });
             }
@@ -485,12 +549,14 @@ export default function ImportPage() {
         try {
             if (isPdf) {
                 const { title, content, pdfBlob, language } = await processPdfBook(file);
-                const id = await db.texts.add({ title, content, language, pdfBlob, createdAt: Date.now() });
+                const cefrLevel = await detectCEFRLevel(content, language);
+                const id = await db.texts.add({ title, content, language, pdfBlob, cefrLevel: cefrLevel ?? undefined, createdAt: Date.now() });
                 router.push(`/read/${id}`);
                 return;
             }
             const { title, content, author, language } = await processEpubBook(file);
-            const id = await db.texts.add({ title, content, author: author || undefined, language, createdAt: Date.now() });
+            const cefrLevel = await detectCEFRLevel(content, language);
+            const id = await db.texts.add({ title, content, author: author || undefined, language, cefrLevel: cefrLevel ?? undefined, createdAt: Date.now() });
             router.push(`/read/${id}`);
         } catch (err) {
             console.error(err);
@@ -579,13 +645,24 @@ export default function ImportPage() {
                     >
                         {/* Content Card - First for importance */}
                         <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl rounded-3xl border border-gray-200/50 dark:border-gray-800/50 shadow-xl shadow-gray-200/20 dark:shadow-none overflow-hidden">
-                            <div className="p-5 sm:p-6 border-b border-gray-100 dark:border-gray-800">
+                            <div className="p-5 sm:p-6 border-b border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-4">
                                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-3">
                                     <div className="p-2.5 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-xl shadow-lg shadow-blue-500/20">
                                         <Save className="w-4 h-4 text-white" />
                                     </div>
                                     Story Details
                                 </h2>
+                                <motion.button
+                                    type="button"
+                                    onClick={handleAutoGenerate}
+                                    disabled={isGeneratingSample}
+                                    whileHover={{ scale: isGeneratingSample ? 1 : 1.02 }}
+                                    whileTap={{ scale: isGeneratingSample ? 1 : 0.98 }}
+                                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:opacity-70 disabled:cursor-wait text-white text-sm font-bold shadow-lg shadow-amber-500/30 transition-all"
+                                >
+                                    {isGeneratingSample ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                                    {isGeneratingSample ? 'Loading…' : 'Auto generate'}
+                                </motion.button>
                             </div>
 
                             <div className="p-5 sm:p-6 space-y-5">
@@ -684,6 +761,28 @@ export default function ImportPage() {
                                             </button>
                                         </div>
                                     </div>
+
+                                    {/* Detected Level (auto) */}
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                            Level
+                                            <span className="text-gray-400 font-normal text-xs">(auto)</span>
+                                        </label>
+                                        <div className="min-h-[44px] px-4 py-3 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 flex items-center">
+                                            {isDetectingLevel ? (
+                                                <span className="text-amber-600 dark:text-amber-400 text-sm font-medium flex items-center gap-2">
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                    Detecting…
+                                                </span>
+                                            ) : detectedLevel ? (
+                                                <span className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 text-sm font-bold rounded-lg border border-emerald-200 dark:border-emerald-800">
+                                                    {detectedLevel}
+                                                </span>
+                                            ) : (
+                                                <span className="text-gray-400 dark:text-gray-500 text-sm">Paste at least 20 words to detect level</span>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
 
                                 {/* Content Textarea */}
@@ -707,12 +806,14 @@ export default function ImportPage() {
                                             required
                                         />
                                         {content && (
-                                            <div className={`absolute bottom-4 right-4 px-3 py-1.5 backdrop-blur-sm rounded-full text-xs font-semibold border ${
-                                                isOverWordLimit
-                                                    ? 'bg-red-50 dark:bg-red-950/80 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800'
-                                                    : 'bg-white/90 dark:bg-gray-800/90 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
-                                            }`}>
-                                                {wordCount} / {MAX_PASTE_WORDS} words
+                                            <div className="absolute bottom-4 right-4">
+                                                <span className={`px-3 py-1.5 backdrop-blur-sm rounded-full text-xs font-semibold border ${
+                                                    isOverWordLimit
+                                                        ? 'bg-red-50 dark:bg-red-950/80 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800'
+                                                        : 'bg-white/90 dark:bg-gray-800/90 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
+                                                }`}>
+                                                    {wordCount} / {MAX_PASTE_WORDS} words
+                                                </span>
                                             </div>
                                         )}
                                         {isOverWordLimit && (
